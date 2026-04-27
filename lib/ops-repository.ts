@@ -18,6 +18,10 @@ type DbRequest = {
   vendor: string | null;
   amount_text: string | null;
   audit_note: string | null;
+  approval_note: string | null;
+  urgent_reason: string | null;
+  urgent_impact: string | null;
+  evidence_files: string[] | null;
   created_at: string;
 };
 
@@ -91,7 +95,7 @@ export async function fetchProfileRole(supabase: SupabaseClient, user: User): Pr
 export async function fetchRequests(supabase: SupabaseClient): Promise<WorkItem[]> {
   const { data, error } = await supabase
     .from("ops_requests")
-    .select("id, request_no, module, title, description, status, priority, campus, due_date, vendor, amount_text, audit_note, created_at")
+    .select("id, request_no, module, title, description, status, priority, campus, due_date, vendor, amount_text, audit_note, approval_note, urgent_reason, urgent_impact, evidence_files, created_at")
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -111,7 +115,11 @@ export async function createRequest(supabase: SupabaseClient, user: User, item: 
     due_date: parseDueDate(item.due),
     vendor: item.vendor ?? null,
     amount_text: item.amount ?? null,
-    audit_note: item.audit
+    audit_note: item.audit,
+    approval_note: item.approvalNote ?? null,
+    urgent_reason: item.urgentReason ?? null,
+    urgent_impact: item.urgentImpact ?? null,
+    evidence_files: item.evidenceFiles ?? []
   });
 
   if (error) throw error;
@@ -122,7 +130,8 @@ export async function updateRequestStatus(supabase: SupabaseClient, item: WorkIt
     .from("ops_requests")
     .update({
       status: statusToDb[item.status],
-      audit_note: item.audit
+      audit_note: item.audit,
+      approval_note: item.approvalNote ?? null
     })
     .eq("request_no", item.id);
 
@@ -147,7 +156,11 @@ export function dbToWorkItem(row: DbRequest): WorkItem {
     audit: row.audit_note ?? "DB 동기화됨",
     description: row.description,
     amount: row.amount_text ?? undefined,
-    vendor: row.vendor ?? undefined
+    vendor: row.vendor ?? undefined,
+    approvalNote: row.approval_note ?? undefined,
+    urgentReason: row.urgent_reason ?? undefined,
+    urgentImpact: row.urgent_impact ?? undefined,
+    evidenceFiles: row.evidence_files ?? undefined
   };
 }
 

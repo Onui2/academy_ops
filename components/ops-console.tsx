@@ -335,7 +335,8 @@ export function OpsConsole() {
           owner: "최고 관리자",
           audit: "학원 관리자 승인 완료 - 최고 관리자 승인 대기",
           approvalStep: 1,
-          approvedByAcademyAdmin: true
+          approvedByAcademyAdmin: true,
+          approvalNote: item.approvalNote
         },
         `${item.id} 학원 관리자 승인`
       );
@@ -349,14 +350,15 @@ export function OpsConsole() {
           status: "진행",
           owner: item.module === "NAS" ? "NAS 관리자" : item.module === "A/S" ? "전산" : "경영지원",
           audit: "최고 관리자 승인 완료 - 담당 부서 진행",
-          approvalStep: (item.approvalStep ?? 1) + 1
+          approvalStep: (item.approvalStep ?? 1) + 1,
+          approvalNote: item.approvalNote
         },
         `${item.id} 최고 관리자 승인`
       );
       return;
     }
 
-    updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1 }, `${item.id} 승인 진행`);
+    updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
   };
   const reject = (item: WorkItem) => updateItem(item.id, { status: "보류", audit: "반려 또는 보완 요청" }, `${item.id} 보류 처리`);
   const remove = (id: string) => {
@@ -727,6 +729,7 @@ function QueueScreen(props: {
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [approvalTarget, setApprovalTarget] = useState<WorkItem | null>(null);
 
   const openDetail = (id: string) => {
     props.setSelectedId(id);
@@ -750,7 +753,19 @@ function QueueScreen(props: {
       ) : null}
       {detailOpen && props.selectedItem ? (
         <Modal title="요청 상세" onClose={() => setDetailOpen(false)}>
-          <DetailPanel item={props.selectedItem} role={props.role} approve={() => props.approve(props.selectedItem!)} reject={() => props.reject(props.selectedItem!)} />
+          <DetailPanel item={props.selectedItem} role={props.role} approve={() => setApprovalTarget(props.selectedItem!)} reject={() => props.reject(props.selectedItem!)} />
+        </Modal>
+      ) : null}
+      {approvalTarget ? (
+        <Modal title="승인 의견" onClose={() => setApprovalTarget(null)}>
+          <ApprovalNoteForm
+            item={approvalTarget}
+            onCancel={() => setApprovalTarget(null)}
+            onSubmit={(note) => {
+              props.approve({ ...approvalTarget, approvalNote: note });
+              setApprovalTarget(null);
+            }}
+          />
         </Modal>
       ) : null}
     </Screen>
@@ -802,7 +817,7 @@ function QueueTable(props: {
                 <td className="px-4 py-3">{item.owner}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
-                    <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.approve(item)} icon={Check} tone="text-emerald-700" />
+                    <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
                     <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.reject(item)} icon={X} tone="text-rose-700" />
                     <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
                   </div>
@@ -1094,9 +1109,55 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
         <Info label="모듈" value={item.module} /><Info label="요청자" value={item.requester} /><Info label="담당" value={item.owner} /><Info label="우선순위" value={item.priority} /><Info label="예산/수량" value={item.amount || "-"} /><Info label="업체" value={item.vendor || "-"} />
       </dl>
       <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 whitespace-pre-line">{item.description || item.audit}</p>
+      {item.priority === "긴급" ? (
+        <div className="mt-3 grid gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+          <p className="font-bold text-red-800">긴급 증빙</p>
+          <Info label="긴급 사유" value={item.urgentReason || "미작성"} />
+          <Info label="영향 범위" value={item.urgentImpact || "미작성"} />
+          <Info label="증빙 파일" value={item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"} />
+        </div>
+      ) : null}
+      {item.approvalNote ? (
+        <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">승인 의견: {item.approvalNote}</p>
+      ) : null}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button disabled={!canApprove(role, item)} onClick={approve} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" aria-hidden="true" />승인</button>
         <button disabled={!canApprove(role, item)} onClick={reject} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"><X className="h-4 w-4" aria-hidden="true" />보류</button>
+      </div>
+    </section>
+  );
+}
+
+function ApprovalNoteForm({ item, onSubmit, onCancel }: { item: WorkItem; onSubmit: (note: string) => void; onCancel: () => void }) {
+  const [note, setNote] = useState("");
+
+  return (
+    <section className="grid gap-4">
+      <div className="rounded-lg bg-slate-50 p-3">
+        <p className="text-sm font-bold">{item.title}</p>
+        <p className="mt-1 text-xs text-slate-500">{item.id} · {item.requester} · {item.priority}</p>
+      </div>
+      {item.priority === "긴급" ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-bold">긴급 검토</p>
+          <p className="mt-1">사유: {item.urgentReason || "미작성"}</p>
+          <p>영향: {item.urgentImpact || "미작성"}</p>
+          <p>증빙: {item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"}</p>
+        </div>
+      ) : null}
+      <textarea
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        className="min-h-28 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500"
+        placeholder="승인 의견을 적어주세요. 예: 예산 범위 내 승인, 긴급 처리 필요"
+      />
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+          취소
+        </button>
+        <button onClick={() => onSubmit(note.trim() || "승인")} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          승인
+        </button>
       </div>
     </section>
   );

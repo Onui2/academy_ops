@@ -25,6 +25,8 @@ type RequestDraft = {
   campus: string;
   detail: string;
   urgency: "보통" | "빠름" | "긴급";
+  urgentReason: string;
+  urgentImpact: string;
 };
 
 const categories = [
@@ -80,7 +82,9 @@ export function UserPortal() {
     title: "",
     campus: "강남캠퍼스",
     detail: "",
-    urgency: "보통"
+    urgency: "보통",
+    urgentReason: "",
+    urgentImpact: ""
   });
   const [submitted, setSubmitted] = useState<RequestDraft[]>([]);
   const [query, setQuery] = useState("");
@@ -97,6 +101,7 @@ export function UserPortal() {
 
   const submit = () => {
     if (!draft.title.trim()) return;
+    if (draft.urgency === "긴급" && (!draft.urgentReason.trim() || !draft.urgentImpact.trim())) return;
     const item: WorkItem = {
       id: makeRequestId(),
       module: categoryToModule(draft.category),
@@ -110,11 +115,14 @@ export function UserPortal() {
       description: files.length ? `${draft.detail}\n\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : draft.detail,
       approvalStep: 0,
       source: "user_portal",
-      approvedByAcademyAdmin: false
+      approvedByAcademyAdmin: false,
+      urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+      urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
+      evidenceFiles: files.map((file) => file.name)
     };
     pushToAdminQueue(item);
     setSubmitted((current) => [{ ...draft }, ...current]);
-    setDraft({ ...draft, title: "", detail: "" });
+    setDraft({ ...draft, title: "", detail: "", urgentReason: "", urgentImpact: "" });
     setFiles([]);
   };
 
@@ -212,6 +220,29 @@ export function UserPortal() {
               {files.length ? (
                 <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
                   {files.length}개 파일 선택됨: {files.map((file) => file.name).join(", ")}
+                </div>
+              ) : null}
+              {draft.urgency === "긴급" ? (
+                <div className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <div>
+                    <label className="text-sm font-bold text-red-800">긴급 사유</label>
+                    <input
+                      value={draft.urgentReason}
+                      onChange={(event) => setDraft({ ...draft, urgentReason: event.target.value })}
+                      className="field mt-2 w-full"
+                      placeholder="예: 오늘 3시 수업 진행 불가"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-red-800">영향 범위</label>
+                    <input
+                      value={draft.urgentImpact}
+                      onChange={(event) => setDraft({ ...draft, urgentImpact: event.target.value })}
+                      className="field mt-2 w-full"
+                      placeholder="예: 4개 반, 학생 80명 영향"
+                    />
+                  </div>
+                  <p className="text-xs text-red-700">긴급 요청은 사유와 영향 범위를 적고 가능하면 사진/문서를 첨부해야 합니다.</p>
                 </div>
               ) : null}
               <button onClick={submit} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700">

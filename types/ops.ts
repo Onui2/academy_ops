@@ -33,6 +33,10 @@ export type WorkItem = {
   approvalStep?: number;
   source?: "user_portal" | "admin_console";
   approvedByAcademyAdmin?: boolean;
+  approvalNote?: string;
+  urgentReason?: string;
+  urgentImpact?: string;
+  evidenceFiles?: string[];
 };
 
 export type ModuleSummary = {
