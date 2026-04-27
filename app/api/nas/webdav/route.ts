@@ -2,7 +2,16 @@ import { NextResponse } from "next/server";
 
 export async function GET() {
   const targets = getTargets();
+  return checkTargets(targets);
+}
 
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  const targets = Array.isArray(body.targets) ? body.targets.filter(isTarget) : [];
+  return checkTargets(targets);
+}
+
+async function checkTargets(targets: WebDavTarget[]) {
   if (!targets.length) {
     return NextResponse.json(
       {
@@ -35,6 +44,12 @@ type WebDavTarget = {
   username: string;
   password: string;
 };
+
+function isTarget(value: unknown): value is WebDavTarget {
+  if (!value || typeof value !== "object") return false;
+  const target = value as Partial<WebDavTarget>;
+  return Boolean(target.id && target.name && target.url && target.username && target.password);
+}
 
 async function checkTarget(target: WebDavTarget) {
   const startedAt = Date.now();

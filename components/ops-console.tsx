@@ -43,6 +43,7 @@ type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = { item: string; count: number; unitPrice: number; campus: string };
 type SublyForm = { item: string; quantity: number; vendor: string; delivery: string };
+type WebDavTargetInput = { id: string; name: string; url: string; username: string; password: string };
 type WebDavResult = {
   ok: boolean;
   configured: boolean;
@@ -54,6 +55,7 @@ type WebDavResult = {
 };
 
 const storageKey = "academy-ops-hub-state-v2";
+const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
 
 const roles: { value: UserRole; label: string }[] = [
   { value: "general", label: "일반" },
@@ -142,6 +144,14 @@ export function OpsConsole() {
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
   const [webdav, setWebdav] = useState<WebDavResult | null>(null);
   const [webdavLoading, setWebdavLoading] = useState(false);
+  const [webdavTargets, setWebdavTargets] = useState<WebDavTargetInput[]>([]);
+  const [webdavDraft, setWebdavDraft] = useState<WebDavTargetInput>({
+    id: "main",
+    name: "메인 NAS",
+    url: "",
+    username: "",
+    password: ""
+  });
 
   useEffect(() => {
     if (supabase) return;
@@ -160,6 +170,21 @@ export function OpsConsole() {
     if (supabase) return;
     window.localStorage.setItem(storageKey, JSON.stringify({ items, audit }));
   }, [items, audit, supabase]);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem(webdavTargetsKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as WebDavTargetInput[];
+      setWebdavTargets(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      window.localStorage.removeItem(webdavTargetsKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(webdavTargetsKey, JSON.stringify(webdavTargets));
+  }, [webdavTargets]);
 
   const loadDbRequests = useCallback(async (nextUser = user) => {
     if (!supabase || !nextUser) return;
@@ -389,7 +414,14 @@ export function OpsConsole() {
   const checkWebDav = async () => {
     setWebdavLoading(true);
     try {
-      const response = await fetch("/api/nas/webdav", { cache: "no-store" });
+      const response = webdavTargets.length
+        ? await fetch("/api/nas/webdav", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targets: webdavTargets }),
+            cache: "no-store"
+          })
+        : await fetch("/api/nas/webdav", { cache: "no-store" });
       const data = await response.json() as WebDavResult;
       setWebdav(data);
     } catch (error) {
@@ -402,6 +434,20 @@ export function OpsConsole() {
     } finally {
       setWebdavLoading(false);
     }
+  };
+
+  const addWebDavTarget = () => {
+    if (!webdavDraft.name || !webdavDraft.url || !webdavDraft.username || !webdavDraft.password) return;
+    const next = {
+      ...webdavDraft,
+      id: webdavDraft.id || webdavDraft.name.replace(/\s+/g, "-").toLowerCase()
+    };
+    setWebdavTargets((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+    setWebdavDraft({ id: "", name: "", url: "", username: "", password: "" });
+  };
+
+  const removeWebDavTarget = (id: string) => {
+    setWebdavTargets((current) => current.filter((item) => item.id !== id));
   };
 
   const resetLocal = () => {
@@ -528,7 +574,7 @@ export function OpsConsole() {
               {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
-              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} webdav={webdav} webdavLoading={webdavLoading} checkWebDav={checkWebDav} /> : null}
+              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} webdav={webdav} webdavLoading={webdavLoading} checkWebDav={checkWebDav} webdavTargets={webdavTargets} webdavDraft={webdavDraft} setWebdavDraft={setWebdavDraft} addWebDavTarget={addWebDavTarget} removeWebDavTarget={removeWebDavTarget} /> : null}
               {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
             </>
           )}
@@ -784,7 +830,12 @@ function NasScreen({
   createNasRequest,
   webdav,
   webdavLoading,
-  checkWebDav
+  checkWebDav,
+  webdavTargets,
+  webdavDraft,
+  setWebdavDraft,
+  addWebDavTarget,
+  removeWebDavTarget
 }: {
   nasUser: string;
   setNasUser: (value: string) => void;
@@ -792,6 +843,11 @@ function NasScreen({
   webdav: WebDavResult | null;
   webdavLoading: boolean;
   checkWebDav: () => void;
+  webdavTargets: WebDavTargetInput[];
+  webdavDraft: WebDavTargetInput;
+  setWebdavDraft: (value: WebDavTargetInput) => void;
+  addWebDavTarget: () => void;
+  removeWebDavTarget: (id: string) => void;
 }) {
   return (
     <Screen title="NAS" desc="용량과 권한 상태를 확인하고 접속 권한 요청을 생성합니다.">
@@ -878,10 +934,44 @@ function NasScreen({
             </div>
           </section>
 
-          <FormPanel icon={HardDrive} title="권한 요청">
-            <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field" aria-label="NAS 사용자" />
-            <ActionButton onClick={createNasRequest} label="권한 요청 생성" />
-          </FormPanel>
+          <div className="grid gap-5">
+            <FormPanel icon={HardDrive} title="WebDAV 추가">
+              <input value={webdavDraft.name} onChange={(event) => setWebdavDraft({ ...webdavDraft, name: event.target.value })} className="field" placeholder="표시 이름: 메인 NAS" />
+              <input value={webdavDraft.id} onChange={(event) => setWebdavDraft({ ...webdavDraft, id: event.target.value })} className="field" placeholder="식별자: main" />
+              <input value={webdavDraft.url} onChange={(event) => setWebdavDraft({ ...webdavDraft, url: event.target.value })} className="field" placeholder="WebDAV URL" />
+              <input value={webdavDraft.username} onChange={(event) => setWebdavDraft({ ...webdavDraft, username: event.target.value })} className="field" placeholder="아이디" />
+              <input value={webdavDraft.password} onChange={(event) => setWebdavDraft({ ...webdavDraft, password: event.target.value })} className="field" placeholder="비밀번호" type="password" />
+              <ActionButton onClick={addWebDavTarget} label="WebDAV 추가" />
+            </FormPanel>
+
+            <section className="surface-strong rounded-2xl p-5">
+              <h3 className="font-bold">등록된 WebDAV</h3>
+              <div className="mt-3 grid gap-2">
+                {webdavTargets.length ? (
+                  webdavTargets.map((target) => (
+                    <div key={target.id} className="rounded-xl border border-gray-200 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold">{target.name}</p>
+                          <p className="truncate text-xs text-gray-500">{target.url}</p>
+                        </div>
+                        <button onClick={() => removeWebDavTarget(target.id)} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold hover:bg-gray-50">
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-500">등록된 WebDAV가 없습니다. 환경변수 또는 직접 추가를 사용할 수 있습니다.</p>
+                )}
+              </div>
+            </section>
+
+            <FormPanel icon={HardDrive} title="권한 요청">
+              <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field" aria-label="NAS 사용자" />
+              <ActionButton onClick={createNasRequest} label="권한 요청 생성" />
+            </FormPanel>
+          </div>
         </div>
       </section>
     </Screen>
