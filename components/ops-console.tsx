@@ -562,29 +562,64 @@ function QueueScreen(props: {
   setForm: (value: RequestForm) => void;
   createManualRequest: () => void;
 }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const openDetail = (id: string) => {
+    props.setSelectedId(id);
+    setDetailOpen(true);
+  };
+
   return (
     <Screen title="요청 큐" desc="모든 요청의 진행 상태와 승인 액션을 관리합니다.">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <QueueTable {...props} />
-        <aside className="grid gap-5">
-          <RequestComposer form={props.form} setForm={props.setForm} createRequest={props.createManualRequest} />
-          {props.selectedItem ? <DetailPanel item={props.selectedItem} role={props.role} approve={() => props.approve(props.selectedItem!)} reject={() => props.reject(props.selectedItem!)} /> : null}
-        </aside>
-      </div>
+      <QueueTable {...props} openCreate={() => setCreateOpen(true)} openDetail={openDetail} />
+      {createOpen ? (
+        <Modal title="요청 접수" onClose={() => setCreateOpen(false)}>
+          <RequestComposer
+            form={props.form}
+            setForm={props.setForm}
+            createRequest={() => {
+              props.createManualRequest();
+              setCreateOpen(false);
+            }}
+          />
+        </Modal>
+      ) : null}
+      {detailOpen && props.selectedItem ? (
+        <Modal title="요청 상세" onClose={() => setDetailOpen(false)}>
+          <DetailPanel item={props.selectedItem} role={props.role} approve={() => props.approve(props.selectedItem!)} reject={() => props.reject(props.selectedItem!)} />
+        </Modal>
+      ) : null}
     </Screen>
   );
 }
 
-function QueueTable(props: { items: WorkItem[]; role: UserRole; status: WorkStatus | "전체"; setStatus: (value: WorkStatus | "전체") => void; setSelectedId: (value: string) => void; approve: (item: WorkItem) => void; reject: (item: WorkItem) => void; remove: (id: string) => void }) {
+function QueueTable(props: {
+  items: WorkItem[];
+  role: UserRole;
+  status: WorkStatus | "전체";
+  setStatus: (value: WorkStatus | "전체") => void;
+  setSelectedId: (value: string) => void;
+  approve: (item: WorkItem) => void;
+  reject: (item: WorkItem) => void;
+  remove: (id: string) => void;
+  openCreate: () => void;
+  openDetail: (id: string) => void;
+}) {
   return (
     <section className="surface-strong min-w-0 overflow-hidden rounded-lg">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3">
         <h3 className="font-bold">업무 목록</h3>
-        <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
-          <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <select value={props.status} onChange={(event) => props.setStatus(event.target.value as WorkStatus | "전체")} className="bg-transparent text-sm outline-none" aria-label="상태 필터">
-            {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <select value={props.status} onChange={(event) => props.setStatus(event.target.value as WorkStatus | "전체")} className="bg-transparent text-sm outline-none" aria-label="상태 필터">
+              {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <button onClick={props.openCreate} className="inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">
+            접수
+          </button>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -594,10 +629,10 @@ function QueueTable(props: { items: WorkItem[]; role: UserRole; status: WorkStat
           </thead>
           <tbody>
             {props.items.map((item) => (
-              <tr key={item.id} className="border-t border-border">
+              <tr key={item.id} className="border-t border-border hover:bg-blue-50/40">
                 <td className="px-4 py-3 font-bold text-blue-700">{item.id}</td>
                 <td className="px-4 py-3">
-                  <button onClick={() => props.setSelectedId(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
+                  <button onClick={() => props.openDetail(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
                   <div className="mt-1 text-xs text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
                 </td>
                 <td className="px-4 py-3"><StatusPill status={item.status} /></td>
@@ -713,9 +748,8 @@ function IconButton({ label, disabled, onClick, icon: Icon, tone }: { label: str
 
 function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void }) {
   return (
-    <section className="surface-strong rounded-lg p-5">
-      <h3 className="font-bold">직접 요청</h3>
-      <div className="mt-3 grid gap-3">
+    <section>
+      <div className="grid gap-3">
         <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value })} className="field" aria-label="모듈">
           <option>전산 장비</option><option>A/S</option><option>부품 구매</option><option>서블리</option><option>NAS</option>
         </select>
@@ -737,7 +771,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
 
 function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: UserRole; approve: () => void; reject: () => void }) {
   return (
-    <section className="surface-strong rounded-lg p-5">
+    <section>
       <div className="flex items-start justify-between gap-3">
         <div><p className="text-xs font-bold text-blue-700">{item.id}</p><h3 className="mt-1 font-bold">{item.title}</h3></div>
         <StatusPill status={item.status} />
@@ -751,6 +785,22 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
         <button disabled={!canApprove(role, item)} onClick={reject} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"><X className="h-4 w-4" aria-hidden="true" />보류</button>
       </div>
     </section>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h3 className="text-lg font-bold">{title}</h3>
+          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50" aria-label="닫기">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="max-h-[78vh] overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
   );
 }
 
