@@ -9,7 +9,6 @@ import {
   ClipboardList,
   FilePlus2,
   Filter,
-  FolderOpen,
   HardDrive,
   Home,
   LogOut,
@@ -31,7 +30,6 @@ import {
   equipmentParts, 
   equipmentPresets,
   modules, 
-  nasMetrics, 
   workItems as seedItems 
 } from "@/lib/ops-data";
 import { createClient } from "@/lib/supabase";
@@ -79,7 +77,7 @@ type WebDavResult = {
   status?: number;
   latencyMs?: number;
   message: string;
-  targets?: Array<{ id: string; name: string; ok: boolean; status?: number; latencyMs?: number; message: string; items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }> }>;
+  targets?: Array<{ id: string; name: string; ok: boolean; status?: number; latencyMs?: number; message: string; quotaUsedBytes?: number | null; quotaAvailableBytes?: number | null; items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }> }>;
   items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null; targetName?: string }>;
 };
 
@@ -201,7 +199,7 @@ export function OpsConsole() {
     roles: ["데스크"],
     notes: ""
   });
-  const [nasUser, setNasUser] = useState("new.staff@academy.local");
+  const [nasUser, setNasUser] = useState("");
   const [webdav, setWebdav] = useState<WebDavResult | null>(null);
   const [webdavLoading, setWebdavLoading] = useState(false);
   const [webdavTargets, setWebdavTargets] = useState<WebDavTargetInput[]>([]);
@@ -220,14 +218,13 @@ export function OpsConsole() {
   const [showWebDavModal, setShowWebDavModal] = useState(false);
   const [config, setConfig] = useState<EquipmentConfig>({
     parts: { 
-      CPU: "cpu-2", 
+      CPU: "cpu-amd-2", 
       RAM: "ram-2", 
       SSD: "ssd-2", 
       "Graphic Card": "gpu-1",
       Mainboard: "mb-1",
       Power: "pwr-1",
-      Case: "case-1",
-      Monitor: "mon-1"
+      Case: "case-1"
     },
     totalPrice: 0
   });
@@ -246,6 +243,10 @@ export function OpsConsole() {
   const updateConfig = (category: string, partId: string) => {
     const nextParts = { ...config.parts, [category]: partId };
     setConfig({ parts: nextParts, totalPrice: calculateTotal(nextParts) });
+  };
+
+  const applyEquipmentPreset = (parts: Record<string, string>) => {
+    setConfig({ parts, totalPrice: calculateTotal(parts) });
   };
 
   useEffect(() => {
@@ -386,6 +387,32 @@ export function OpsConsole() {
   };
 
   const approve = (item: WorkItem) => {
+    if (role === "super_admin") {
+      const nextStatusValue = item.status === "진행" ? "완료" : "진행";
+      updateItem(
+        item.id,
+        {
+          status: nextStatusValue,
+          owner: nextStatusValue === "완료"
+            ? item.owner
+            : item.module === "NAS"
+              ? "NAS 관리자"
+              : item.module === "A/S"
+                ? "전산"
+                : "경영지원",
+          audit: nextStatusValue === "완료"
+            ? "최고 관리자 최종 승인 완료"
+            : "최고 관리자 승인 완료 - 담당 부서 진행",
+          approvalStep: Math.max((item.approvalStep ?? 0) + 1, 2),
+          approvedByAcademyAdmin: true,
+          approvalNote: item.approvalNote,
+          rejectionNote: nextStatusValue === "진행" ? undefined : item.rejectionNote
+        },
+        nextStatusValue === "완료" ? `${item.id} 최고 관리자 완료 승인` : `${item.id} 최고 관리자 즉시 승인`
+      );
+      return;
+    }
+
     if (role === "academy_admin" && item.status === "접수") {
       updateItem(
         item.id,
@@ -398,21 +425,6 @@ export function OpsConsole() {
           approvalNote: item.approvalNote
         },
         `${item.id} 학원 관리자 승인`
-      );
-      return;
-    }
-
-    if (role === "super_admin" && item.status === "승인 대기") {
-      updateItem(
-        item.id,
-        {
-          status: "진행",
-          owner: item.module === "NAS" ? "NAS 관리자" : item.module === "A/S" ? "전산" : "경영지원",
-          audit: "최고 관리자 승인 완료 - 담당 부서 진행",
-          approvalStep: (item.approvalStep ?? 1) + 1,
-          approvalNote: item.approvalNote
-        },
-        `${item.id} 최고 관리자 승인`
       );
       return;
     }
@@ -511,17 +523,20 @@ export function OpsConsole() {
     source: "admin_console"
   });
 
-  const createNasRequest = () => addRequest({
-    module: "NAS",
-    title: `${nasUser} NAS/RaiDrive 권한 요청`,
-    requester: "인사",
-    owner: "NAS 관리자",
-    status: "접수",
-    priority: "보통",
-    due: "오늘",
-    audit: "MFA 확인 필요",
-    description: "신규 직원 공용 NAS 접속 권한과 RaiDrive 안내 필요"
-  });
+  const createNasRequest = () => {
+    if (!nasUser.trim()) return;
+    addRequest({
+      module: "NAS",
+      title: `${nasUser} NAS/RaiDrive 권한 요청`,
+      requester: "인사",
+      owner: "NAS 관리자",
+      status: "접수",
+      priority: "보통",
+      due: "오늘",
+      audit: "MFA 확인 필요",
+      description: "신규 직원 공용 NAS 접속 권한과 RaiDrive 안내 필요"
+    });
+  };
 
   const checkWebDav = async () => {
     setWebdavLoading(true);
@@ -710,7 +725,7 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} applyEquipmentPreset={applyEquipmentPreset} updateConfig={updateConfig} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
                 <NasScreen 
@@ -922,7 +937,10 @@ function QueueTable(props: {
   return (
     <section className="surface-strong min-w-0 overflow-hidden rounded-lg">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3">
-        <h3 className="font-bold">업무 목록</h3>
+        <div>
+          <h3 className="font-bold">구매/처리 대기열</h3>
+          <p className="text-xs text-slate-500">요청별 상태, 지점, 예산 흐름을 카드형으로 관리합니다.</p>
+        </div>
         <div className="flex items-center gap-2">
           <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
             <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -935,31 +953,52 @@ function QueueTable(props: {
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
-          <thead className="bg-slate-50/80 text-left text-xs uppercase text-slate-500">
-            <tr><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
-          </thead>
-          <tbody>
-            {props.items.map((item) => (
-              <tr key={item.id} className="border-t border-border hover:bg-blue-50/40">
-                <td className="px-4 py-3">
-                  <button onClick={() => props.openDetail(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
-                  <div className="mt-1 text-xs text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
-                </td>
-                <td className="px-4 py-3"><StatusPill status={item.status} /></td>
-                <td className="px-4 py-3">{item.owner}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
-                    <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
-                    <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+        {props.items.map((item) => (
+          <article
+            key={item.id}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{item.id}</p>
+                <button onClick={() => props.openDetail(item.id)} className="mt-1 text-left text-sm font-bold text-slate-900 hover:text-blue-700">
+                  {item.title}
+                </button>
+              </div>
+              <StatusPill status={item.status} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-slate-400">분류</p>
+                <p className="mt-1 font-bold text-slate-700">{item.module}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-slate-400">우선순위</p>
+                <p className="mt-1 font-bold text-slate-700">{item.priority}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-slate-400">요청 지점</p>
+                <p className="mt-1 font-bold text-slate-700">{item.requester}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-slate-400">담당</p>
+                <p className="mt-1 font-bold text-slate-700">{item.owner}</p>
+              </div>
+            </div>
+            <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
+              {item.amount || item.audit || "추가 정보 없음"}
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-xs text-slate-400">처리 목표: {item.due}</p>
+              <div className="flex gap-2">
+                <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
+                <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
+                <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
+              </div>
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );
@@ -970,17 +1009,20 @@ function EquipmentScreen({
   setEquipment,
   createEquipment,
   config,
-  setConfig,
+  applyEquipmentPreset,
   updateConfig
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
   createEquipment: () => void;
   config: EquipmentConfig;
-  setConfig: (config: EquipmentConfig) => void;
+  applyEquipmentPreset: (parts: Record<string, string>) => void;
   updateConfig: (category: string, partId: string) => void;
 }) {
   const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
+  const visibleConfigCategories = equipment.item === "노트북"
+    ? ["RAM", "SSD"]
+    : Object.keys(config.parts);
   const basePrice = isCustomizable ? config.totalPrice : equipment.unitPrice;
   const total = equipment.count * basePrice;
 
@@ -1013,7 +1055,6 @@ function EquipmentScreen({
                 <option>데스크톱</option>
                 <option>모니터</option>
                 <option>태블릿</option>
-                <option>프린터</option>
                 <option>공유기/네트워크 장비</option>
                 <option>기타 장비</option>
               </select>
@@ -1030,7 +1071,7 @@ function EquipmentScreen({
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => setConfig({ ...config, parts: preset.parts })}
+                        onClick={() => applyEquipmentPreset(preset.parts)}
                         className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm"
                       >
                         {preset.name}
@@ -1040,7 +1081,7 @@ function EquipmentScreen({
                 </div>
 
                 <div className="grid gap-6">
-                  {Object.keys(config.parts).map((category) => (
+                  {visibleConfigCategories.map((category) => (
                     <div key={category} className="grid gap-2 sm:grid-cols-[120px_1fr]">
                       <span className="text-sm font-bold text-slate-600">{category}</span>
                       <div className="grid gap-2">
@@ -1067,6 +1108,11 @@ function EquipmentScreen({
                     </div>
                   ))}
                 </div>
+                {equipment.item === "노트북" ? (
+                  <p className="mt-4 rounded-xl border border-blue-100 bg-white px-4 py-3 text-xs text-blue-800">
+                    노트북은 실구매 단계에서 모델별 CPU 차이가 커서 여기서는 `RAM`과 `SSD`만 맞추고, 최종 모델은 직접 확인해서 결정하는 흐름으로 맞췄습니다.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <EquipmentRow label="단가">
@@ -1092,8 +1138,10 @@ function EquipmentScreen({
 
           <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
-              <p className="text-xs text-slate-500">대당 단가: {basePrice.toLocaleString()}원</p>
-              <p className={`mt-1 rounded-xl px-3 py-2 text-sm font-bold ${total > 500000 ? "bg-amber-100 text-amber-900" : "bg-blue-100 text-blue-900"}`}>
+              <p className={`rounded-xl px-3 py-2 text-sm font-bold ${total > 500000 ? "bg-amber-50 text-amber-900" : "bg-blue-50 text-blue-900"}`}>
+                대당 단가: {basePrice.toLocaleString()}원
+              </p>
+              <p className={`mt-2 rounded-xl px-3 py-2 text-sm font-bold ${total > 500000 ? "bg-amber-100 text-amber-900" : "bg-blue-100 text-blue-900"}`}>
                 총 견적 {total.toLocaleString("ko-KR")}원
               </p>
             </div>
@@ -1208,6 +1256,13 @@ function NasScreen({
   setShowWebDavModal: (value: boolean) => void;
   setEditingTargetId: (id: string | null) => void;
 }) {
+  const targetSummaries = webdav?.targets ?? [];
+  const totalUsedBytes = targetSummaries.reduce((sum, target) => sum + (target.quotaUsedBytes ?? 0), 0);
+  const totalAvailableBytes = targetSummaries.reduce((sum, target) => sum + (target.quotaAvailableBytes ?? 0), 0);
+  const totalCapacityBytes = totalUsedBytes + totalAvailableBytes;
+  const connectedTargets = targetSummaries.filter((target) => target.ok).length;
+  const usagePercent = totalCapacityBytes ? Math.round((totalUsedBytes / totalCapacityBytes) * 100) : 0;
+
   return (
     <Screen title="NAS" desc="멀티 학원 환경을 중앙에서 한눈에 관리하고 연결 상태를 실시간 제어합니다.">
       <section className="grid gap-5">
@@ -1267,21 +1322,45 @@ function NasScreen({
         )}
 
         <div className="grid gap-4 md:grid-cols-3">
-          {nasMetrics.map((metric) => (
-            <article key={metric.label} className="surface-strong rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">{metric.label}</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
-                  <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
-                </div>
+          <article className="surface-strong rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">NAS 연결 상태</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
+                <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
               </div>
-              <div className="mt-4 text-3xl font-black">{metric.value}</div>
-              <p className="mt-1 text-xs font-semibold text-gray-400">{metric.detail}</p>
-              <div className="mt-4 progress-track bg-slate-100">
-                <div className={`h-full rounded-full transition-all duration-500 ${metric.health === "주의" ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]" : metric.health === "위험" ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : "bg-emerald-500"}`} style={{ width: metric.value.includes("%") ? metric.value : "62%" }} />
+            </div>
+            <div className="mt-4 text-3xl font-black">{connectedTargets}/{webdavTargets.length || 0}</div>
+            <p className="mt-1 text-xs font-semibold text-gray-400">동기화된 WebDAV 타겟 수</p>
+            <div className="mt-4 progress-track bg-slate-100">
+              <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: webdavTargets.length ? `${(connectedTargets / webdavTargets.length) * 100}%` : "0%" }} />
+            </div>
+          </article>
+          <article className="surface-strong rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">총 NAS 사용량</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
+                <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
               </div>
-            </article>
-          ))}
+            </div>
+            <div className="mt-4 text-3xl font-black">{totalCapacityBytes ? `${usagePercent}%` : "-"}</div>
+            <p className="mt-1 text-xs font-semibold text-gray-400">{totalCapacityBytes ? `${formatBytes(totalUsedBytes)} / ${formatBytes(totalCapacityBytes)} 사용` : "상태 동기화 후 용량 표시"}</p>
+            <div className="mt-4 progress-track bg-slate-100">
+              <div className={`h-full rounded-full transition-all duration-500 ${usagePercent >= 85 ? "bg-rose-500" : usagePercent >= 70 ? "bg-amber-400" : "bg-emerald-500"}`} style={{ width: `${usagePercent}%` }} />
+            </div>
+          </article>
+          <article className="surface-strong rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">남은 가용 용량</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
+                <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
+              </div>
+            </div>
+            <div className="mt-4 text-3xl font-black">{totalCapacityBytes ? formatBytes(totalAvailableBytes) : "-"}</div>
+            <p className="mt-1 text-xs font-semibold text-gray-400">연결된 타겟 합산 기준</p>
+            <div className="mt-4 progress-track bg-slate-100">
+              <div className="h-full rounded-full bg-blue-500 transition-all duration-500" style={{ width: totalCapacityBytes ? `${Math.max(100 - usagePercent, 0)}%` : "0%" }} />
+            </div>
+          </article>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -1336,11 +1415,23 @@ function NasScreen({
                             <p className="text-sm font-black text-slate-700">{result?.latencyMs}ms</p>
                           </div>
                           <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">Stored Files</p>
-                            <p className="text-sm font-black text-slate-700">{result?.items.length} units</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Usage</p>
+                            <p className="text-sm font-black text-slate-700">
+                              {result?.quotaUsedBytes != null && result?.quotaAvailableBytes != null
+                                ? `${Math.round((result.quotaUsedBytes / (result.quotaUsedBytes + result.quotaAvailableBytes || 1)) * 100)}%`
+                                : "-"}
+                            </p>
                           </div>
                         </div>
                       )}
+
+                      {isOnline && result?.quotaUsedBytes != null && result?.quotaAvailableBytes != null ? (
+                        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-3 text-xs text-blue-900">
+                          <p className="font-bold">용량 정보</p>
+                          <p className="mt-1">{formatBytes(result.quotaUsedBytes)} 사용 / {formatBytes(result.quotaUsedBytes + result.quotaAvailableBytes)} 전체</p>
+                          <p className="text-blue-700">남은 용량 {formatBytes(result.quotaAvailableBytes)}</p>
+                        </div>
+                      ) : null}
 
                       <div className="mt-4 flex gap-2">
                         <button onClick={() => startEditWebDavTarget(target)} className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50">설정 수정</button>
@@ -1355,27 +1446,6 @@ function NasScreen({
                 })}
               </div>
 
-              {(webdav?.items ?? []).length > 0 && (
-                <div className="mt-6">
-                    <h4 className="text-sm font-bold text-slate-800 mb-3">최근 파일 시스템 노출</h4>
-                    <div className="grid gap-2">
-                        {webdav!.items.slice(0, 5).map((item) => (
-                            <div key={`${item.path}-${item.name}`} className="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm hover:translate-x-1 transition">
-                                <div className="flex min-w-0 items-center gap-3">
-                                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${item.type === "folder" ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-500"}`}>
-                                        <FolderOpen className="h-4 w-4" aria-hidden="true" />
-                                    </div>
-                                    <div>
-                                        <p className="truncate font-bold text-slate-800">{item.name}</p>
-                                        <p className="text-[10px] text-slate-400">{item.targetName || "Storage Source"}</p>
-                                    </div>
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-400">{item.size ? `${Math.round(item.size / 1024)}KB` : "DIR"}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-              )}
             </section>
           </div>
 
@@ -1417,6 +1487,13 @@ function FormPanel({ title, icon: Icon, children }: { title: string; icon: Lucid
 
 function ActionButton({ onClick, label }: { onClick: () => void; label: string }) {
   return <button onClick={onClick} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700"><FilePlus2 className="h-4 w-4" aria-hidden="true" />{label}</button>;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${bytes} B`;
 }
 
 function IconButton({ label, disabled, onClick, icon: Icon, tone }: { label: string; disabled: boolean; onClick: () => void; icon: LucideIcon; tone: string }) {

@@ -103,10 +103,8 @@ export const aiHarnessSteps = [
 
 export const equipmentParts: EquipmentPart[] = [
   // CPU
-  { id: "cpu-2", category: "CPU", name: "Intel Core i5 (13th Gen)", price: 280000, description: "표준 업무용", performanceNote: "멀티태스킹과 엑셀 작업이 원활합니다.", tier: "업무용" },
-  { id: "cpu-amd-2", category: "CPU", name: "AMD Ryzen 5 (7000 Series)", price: 270000, description: "표준 업무용 (AMD)", performanceNote: "멀티코어 성능이 뛰어나 여러 프로그램을 띄우기 좋습니다.", tier: "업무용" },
-  { id: "cpu-3", category: "CPU", name: "Intel Core i7 (14th Gen)", price: 480000, description: "고성능 전문가용", performanceNote: "무거운 디자인, 영상 편집 프로그램도 거뜬합니다.", tier: "고성능" },
-  { id: "cpu-amd-3", category: "CPU", name: "AMD Ryzen 7 (8000 Series)", price: 490000, description: "고성능 전문가용 (AMD)", performanceNote: "강력한 연산 성능으로 그래픽 작업 속도를 높여줍니다.", tier: "고성능" },
+  { id: "cpu-amd-2", category: "CPU", name: "AMD Ryzen 5 (7000 Series)", price: 270000, description: "표준 업무용", performanceNote: "멀티코어 성능이 뛰어나 여러 프로그램을 띄우기 좋습니다.", tier: "업무용" },
+  { id: "cpu-amd-3", category: "CPU", name: "AMD Ryzen 7 (8000 Series)", price: 490000, description: "고성능 전문가용", performanceNote: "강력한 연산 성능으로 그래픽 작업 속도를 높여줍니다.", tier: "고성능" },
   
   // RAM
   { id: "ram-1", category: "RAM", name: "8GB DDR5", price: 45000, description: "최소 사양", performanceNote: "기본적인 업무 수행이 가능합니다.", tier: "기본" },
@@ -135,9 +133,6 @@ export const equipmentParts: EquipmentPart[] = [
   { id: "case-1", category: "Case", name: "미니 타워 (심플)", price: 35000, description: "공간 절약", performanceNote: "데스크 위 공간 활용도가 높습니다.", tier: "업무용" },
   { id: "case-2", category: "Case", name: "미들 타워 (통풍형)", price: 65000, description: "우수한 쿨링", performanceNote: "내부 열 배출이 원활하여 장시간 사용 시 유리합니다.", tier: "고성능" },
 
-  // Monitor
-  { id: "mon-1", category: "Monitor", name: "24인치 FHD 75Hz", price: 140000, description: "표준 사무용", performanceNote: "가장 보편적인 업무용 사이즈입니다.", tier: "기본" },
-  { id: "mon-2", category: "Monitor", name: "27인치 QHD 144Hz", price: 320000, description: "고해상도", performanceNote: "화면이 넓어 엑셀이나 문서를 두 개 띄우기 좋습니다.", tier: "업무용" }
 ];
 
 export const equipmentPresets: EquipmentPreset[] = [
@@ -146,14 +141,13 @@ export const equipmentPresets: EquipmentPreset[] = [
     name: "강사용 수업 PC (기본)",
     group: "강사용(기본)",
     parts: {
-      CPU: "cpu-2",
+      CPU: "cpu-amd-2",
       RAM: "ram-1",
       SSD: "ssd-1",
       "Graphic Card": "gpu-1",
       Mainboard: "mb-1",
       Power: "pwr-1",
-      Case: "case-1",
-      Monitor: "mon-1"
+      Case: "case-1"
     }
   },
   {
@@ -161,14 +155,13 @@ export const equipmentPresets: EquipmentPreset[] = [
     name: "데스크/관리자 PC (표준)",
     group: "행정용(표준)",
     parts: {
-      CPU: "cpu-2",
+      CPU: "cpu-amd-2",
       RAM: "ram-2",
       SSD: "ssd-2",
       "Graphic Card": "gpu-1",
       Mainboard: "mb-1",
       Power: "pwr-1",
-      Case: "case-1",
-      Monitor: "mon-1"
+      Case: "case-1"
     }
   },
   {
@@ -176,14 +169,13 @@ export const equipmentPresets: EquipmentPreset[] = [
     name: "전문 편집/대용량 엑셀 (고성능)",
     group: "전문가용(고성능)",
     parts: {
-      CPU: "cpu-3",
+      CPU: "cpu-amd-3",
       RAM: "ram-3",
       SSD: "ssd-3",
       "Graphic Card": "gpu-2",
       Mainboard: "mb-2",
       Power: "pwr-2",
-      Case: "case-2",
-      Monitor: "mon-2"
+      Case: "case-2"
     }
   }
 ];

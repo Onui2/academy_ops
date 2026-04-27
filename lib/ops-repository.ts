@@ -164,7 +164,8 @@ export function dbToWorkItem(row: DbRequest): WorkItem {
     rejectionNote: row.rejection_note ?? undefined,
     urgentReason: row.urgent_reason ?? undefined,
     urgentImpact: row.urgent_impact ?? undefined,
-    evidenceFiles: row.evidence_files ?? undefined
+    evidenceFiles: row.evidence_files ?? undefined,
+    createdAt: row.created_at
   };
 }
 

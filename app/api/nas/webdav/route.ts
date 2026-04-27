@@ -75,6 +75,8 @@ async function checkTarget(target: WebDavTarget) {
       status: response.status,
       latencyMs: Date.now() - startedAt,
       message: response.ok || response.status === 207 ? "WebDAV connected" : response.statusText,
+      quotaUsedBytes: parseQuota(text).usedBytes,
+      quotaAvailableBytes: parseQuota(text).availableBytes,
       items: parseDavItems(text).slice(0, 12)
     };
   } catch (error) {
@@ -84,6 +86,8 @@ async function checkTarget(target: WebDavTarget) {
       ok: false,
       latencyMs: Date.now() - startedAt,
       message: error instanceof Error ? error.message : "WebDAV connection failed",
+      quotaUsedBytes: null,
+      quotaAvailableBytes: null,
       items: []
     };
   }
@@ -141,4 +145,10 @@ function parseDavItems(xml: string) {
 function pick(xml: string, tag: string) {
   const match = xml.match(new RegExp(`<[^:>]*:?${tag}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tag}>`, "i"));
   return match?.[1]?.trim() ?? "";
+}
+
+function parseQuota(xml: string) {
+  const usedBytes = Number(pick(xml, "quota-used-bytes")) || null;
+  const availableBytes = Number(pick(xml, "quota-available-bytes")) || null;
+  return { usedBytes, availableBytes };
 }
