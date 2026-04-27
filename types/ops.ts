@@ -57,7 +57,7 @@ export type NasMetric = {
 
 export type EquipmentPart = {
   id: string;
-  category: "CPU" | "RAM" | "SSD" | "GPU" | "Display" | "Other";
+  category: "CPU" | "RAM" | "SSD" | "Mainboard" | "Power" | "Case" | "Graphic Card" | "Monitor" | "Keyboard" | "Mouse" | "Etc";
   name: string;
   price: number;
   description: string;
@@ -68,4 +68,11 @@ export type EquipmentPart = {
 export type EquipmentConfig = {
   parts: Record<string, string>; // category -> partId
   totalPrice: number;
+};
+
+export type EquipmentPreset = {
+  id: string;
+  name: string;
+  group: "강사용(기본)" | "행정용(표준)" | "전문가용(고성능)";
+  parts: Record<string, string>;
 };

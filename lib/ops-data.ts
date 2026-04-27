@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   Truck
 } from "lucide-react";
-import type { ModuleSummary, NasMetric, WorkItem } from "@/types/ops";
+import type { EquipmentPart, EquipmentPreset, ModuleSummary, NasMetric, WorkItem } from "@/types/ops";
 
 export const modules: ModuleSummary[] = [
   {
@@ -26,13 +26,6 @@ export const modules: ModuleSummary[] = [
     tone: "bg-rose-50 text-rose-700"
   },
   {
-    name: "서블리 출판",
-    description: "견적, 승인, 발주, 배송 추적",
-    count: 5,
-    icon: Truck,
-    tone: "bg-amber-50 text-amber-700"
-  },
-  {
     name: "NAS 관리",
     description: "용량, 사용자, 권한, 접속 안내",
     count: 3,
@@ -46,7 +39,7 @@ export const workItems: WorkItem[] = [
     id: "AOH-1042",
     module: "전산 장비",
     title: "신규 강의실 노트북 12대 구매 승인",
-    requester: "강남캠퍼스",
+    requester: "손샘(대구)",
     owner: "경영지원",
     status: "승인 대기",
     priority: "긴급",
@@ -59,25 +52,13 @@ export const workItems: WorkItem[] = [
     id: "AOH-1038",
     module: "A/S",
     title: "3층 빔프로젝터 화면 깜박임",
-    requester: "송파캠퍼스",
+    requester: "손샘(송파)",
     owner: "전산",
     status: "진행",
     priority: "높음",
     due: "내일",
     audit: "FAQ 실패 후 업체 티켓 생성",
     vendor: "AV Care"
-  },
-  {
-    id: "AOH-1031",
-    module: "서블리",
-    title: "겨울 방학 홍보물 추가 인쇄",
-    requester: "마케팅",
-    owner: "구매",
-    status: "검토",
-    priority: "보통",
-    due: "4월 30일",
-    audit: "견적 2건 대기",
-    amount: "1,500부"
   },
   {
     id: "AOH-1029",
@@ -122,9 +103,10 @@ export const aiHarnessSteps = [
 
 export const equipmentParts: EquipmentPart[] = [
   // CPU
-  { id: "cpu-1", category: "CPU", name: "Intel Core i3 (13th Gen)", price: 150000, description: "기본 사무용", performanceNote: "간단한 문서 작업과 웹서핑에 적합합니다.", tier: "기본" },
   { id: "cpu-2", category: "CPU", name: "Intel Core i5 (13th Gen)", price: 280000, description: "표준 업무용", performanceNote: "멀티태스킹과 엑셀 작업이 원활합니다.", tier: "업무용" },
+  { id: "cpu-amd-2", category: "CPU", name: "AMD Ryzen 5 (7000 Series)", price: 270000, description: "표준 업무용 (AMD)", performanceNote: "멀티코어 성능이 뛰어나 여러 프로그램을 띄우기 좋습니다.", tier: "업무용" },
   { id: "cpu-3", category: "CPU", name: "Intel Core i7 (14th Gen)", price: 480000, description: "고성능 전문가용", performanceNote: "무거운 디자인, 영상 편집 프로그램도 거뜬합니다.", tier: "고성능" },
+  { id: "cpu-amd-3", category: "CPU", name: "AMD Ryzen 7 (8000 Series)", price: 490000, description: "고성능 전문가용 (AMD)", performanceNote: "강력한 연산 성능으로 그래픽 작업 속도를 높여줍니다.", tier: "고성능" },
   
   // RAM
   { id: "ram-1", category: "RAM", name: "8GB DDR5", price: 45000, description: "최소 사양", performanceNote: "기본적인 업무 수행이 가능합니다.", tier: "기본" },
@@ -156,4 +138,52 @@ export const equipmentParts: EquipmentPart[] = [
   // Monitor
   { id: "mon-1", category: "Monitor", name: "24인치 FHD 75Hz", price: 140000, description: "표준 사무용", performanceNote: "가장 보편적인 업무용 사이즈입니다.", tier: "기본" },
   { id: "mon-2", category: "Monitor", name: "27인치 QHD 144Hz", price: 320000, description: "고해상도", performanceNote: "화면이 넓어 엑셀이나 문서를 두 개 띄우기 좋습니다.", tier: "업무용" }
+];
+
+export const equipmentPresets: EquipmentPreset[] = [
+  {
+    id: "preset-basic",
+    name: "강사용 수업 PC (기본)",
+    group: "강사용(기본)",
+    parts: {
+      CPU: "cpu-2",
+      RAM: "ram-1",
+      SSD: "ssd-1",
+      "Graphic Card": "gpu-1",
+      Mainboard: "mb-1",
+      Power: "pwr-1",
+      Case: "case-1",
+      Monitor: "mon-1"
+    }
+  },
+  {
+    id: "preset-standard",
+    name: "데스크/관리자 PC (표준)",
+    group: "행정용(표준)",
+    parts: {
+      CPU: "cpu-2",
+      RAM: "ram-2",
+      SSD: "ssd-2",
+      "Graphic Card": "gpu-1",
+      Mainboard: "mb-1",
+      Power: "pwr-1",
+      Case: "case-1",
+      Monitor: "mon-1"
+    }
+  },
+  {
+    id: "preset-high",
+    name: "전문 편집/대용량 엑셀 (고성능)",
+    group: "전문가용(고성능)",
+    parts: {
+      CPU: "cpu-3",
+      RAM: "ram-3",
+      SSD: "ssd-3",
+      "Graphic Card": "gpu-2",
+      Mainboard: "mb-2",
+      Power: "pwr-2",
+      Case: "case-2",
+      Monitor: "mon-2"
+    }
+  }
 ];

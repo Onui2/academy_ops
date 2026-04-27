@@ -14,26 +14,30 @@ import {
   Wrench
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import type { WorkItem } from "@/types/ops";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase";
+import { fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
+import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
 
-type Category = "equipment" | "as" | "subly" | "nas" | "other";
+type Category = "equipment" | "as" | "software" | "network" | "subly" | "nas" | "other";
 
 type RequestDraft = {
   category: Category;
   title: string;
-  campus: string;
+  academy: string;
   detail: string;
   urgency: "보통" | "빠름" | "긴급";
   urgentReason: string;
   urgentImpact: string;
+  resubmitId?: string;
 };
 
 const categories = [
   {
     id: "equipment" as const,
     title: "장비가 필요해요",
-    desc: "노트북, 빔프로젝터, 키보드, 부품",
+    desc: "노트북, 데스크탑, 모니터, 키보드, 마우스, 태블릿, 부품",
     icon: Laptop,
     tone: "bg-blue-50 text-blue-700"
   },
@@ -45,15 +49,8 @@ const categories = [
     tone: "bg-red-50 text-red-700"
   },
   {
-    id: "subly" as const,
-    title: "제작/인쇄 요청",
-    desc: "홍보물, 안내문, 교재, 배너",
-    icon: Printer,
-    tone: "bg-amber-50 text-amber-700"
-  },
-  {
     id: "nas" as const,
-    title: "NAS 접속/권한",
+    title: "NAS 접속",
     desc: "RaiDrive, 폴더 권한, 계정 추가",
     icon: HardDrive,
     tone: "bg-emerald-50 text-emerald-700"
@@ -71,7 +68,7 @@ const samples = [
   "3층 빔프로젝터 화면이 깜박여요",
   "신규 선생님 NAS 접속 권한이 필요해요",
   "강의실 노트북 2대가 더 필요해요",
-  "겨울 방학 안내문 500부 인쇄 요청"
+  "모니터가 갑자기 안 나와요"
 ];
 
 const adminStorageKey = "academy-ops-hub-state-v2";
@@ -80,15 +77,91 @@ export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
     category: "equipment",
     title: "",
-    campus: "강남캠퍼스",
+    academy: "",
     detail: "",
     urgency: "보통",
     urgentReason: "",
     urgentImpact: ""
   });
-  const [submitted, setSubmitted] = useState<RequestDraft[]>([]);
+  const [submitted, setSubmitted] = useState<WorkItem[]>([]);
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [supabase] = useState(() => createClient());
+  const [isLoading, setIsLoading] = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    if (supabase) {
+      try {
+        const rows = await fetchRequests(supabase);
+        setSubmitted(rows);
+      } catch (err) {
+        console.error("Failed to load history from DB", err);
+      }
+    } else {
+      const raw = window.localStorage.getItem(adminStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { items?: WorkItem[] };
+        setSubmitted(parsed.items ?? []);
+      }
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  const loadForResubmit = (item: WorkItem) => {
+    const categoryMap: Record<string, Category> = {
+      "전산 장비": "equipment",
+      "A/S": "as",
+      "서블리": "subly",
+      "NAS": "nas",
+      "기타": "other"
+    };
+
+    setDraft({
+      category: categoryMap[item.module] ?? "other",
+      title: item.title,
+      campus: item.requester,
+      detail: item.description ?? "",
+      urgency: item.priority === "긴급" ? "긴급" : item.priority === "높음" ? "빠름" : "보통",
+      urgentReason: item.urgentReason ?? "",
+      urgentImpact: item.urgentImpact ?? "",
+      resubmitId: item.id
+    });
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const [config, setConfig] = useState<EquipmentConfig>({
+    parts: {
+      CPU: "cpu-2",
+      RAM: "ram-2",
+      SSD: "ssd-2",
+      "Graphic Card": "gpu-1",
+      Mainboard: "mb-1",
+      Power: "pwr-1",
+      Case: "case-1",
+      Monitor: "mon-1"
+    },
+    totalPrice: 0
+  });
+
+  const calculateTotal = useCallback((nextParts: Record<string, string>) => {
+    return Object.values(nextParts).reduce((sum, partId) => {
+      const part = equipmentParts.find((p) => p.id === partId);
+      return sum + (part?.price ?? 0);
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    setConfig((prev) => ({ ...prev, totalPrice: calculateTotal(prev.parts) }));
+  }, [calculateTotal]);
+
+  const updateConfig = (category: string, partId: string) => {
+    const nextParts = { ...config.parts, [category]: partId };
+    setConfig({ parts: nextParts, totalPrice: calculateTotal(nextParts) });
+  };
 
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
   const helperText = useMemo(() => {
@@ -99,31 +172,81 @@ export function UserPortal() {
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
 
-  const submit = () => {
+  const submit = async () => {
     if (!draft.title.trim()) return;
-    if (draft.urgency === "긴급" && (!draft.urgentReason.trim() || !draft.urgentImpact.trim())) return;
-    const item: WorkItem = {
-      id: makeRequestId(),
-      module: categoryToModule(draft.category),
-      title: draft.title,
-      requester: draft.campus,
-      owner: "학원 관리자",
-      status: "접수",
-      priority: draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통",
-      due: draft.urgency === "긴급" ? "오늘" : "신규",
-      audit: "사용자 포털 접수 - 학원 관리자 승인 대기",
-      description: files.length ? `${draft.detail}\n\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : draft.detail,
-      approvalStep: 0,
-      source: "user_portal",
-      approvedByAcademyAdmin: false,
-      urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
-      urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
-      evidenceFiles: files.map((file) => file.name)
-    };
-    pushToAdminQueue(item);
-    setSubmitted((current) => [{ ...draft }, ...current]);
-    setDraft({ ...draft, title: "", detail: "", urgentReason: "", urgentImpact: "" });
+    if (draft.urgency === "긴급" && !draft.urgentReason.trim()) return;
+
+    setIsLoading(true);
+
+    const priority: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
+    const isCustom = draft.category === "equipment";
+
+    const configLines = isCustom
+      ? [
+        "--- 요청 사양 상세 ---",
+        ...Object.entries(config.parts).map(([cat, id]) => {
+          const part = equipmentParts.find((p) => p.id === id);
+          return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
+        }),
+        `대당 가격 합계: ${config.totalPrice.toLocaleString()}원`
+      ]
+      : [];
+
+    const description = [
+      ...configLines,
+      draft.detail,
+      files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
+    ].filter(Boolean).join("\n");
+
+    if (draft.resubmitId) {
+      const existing = submitted.find(s => s.id === draft.resubmitId);
+      if (existing) {
+        const updated: WorkItem = {
+          ...existing,
+          title: draft.title,
+          requester: draft.academy,
+          status: "접수", // Resubmitting resets to initial status
+          priority,
+          description,
+          urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+          audit: `${existing.id} 보류 후 재접수됨`
+        };
+
+        if (supabase) {
+          await updateRequestStatus(supabase, updated);
+        } else {
+          updateInAdminQueue(updated);
+        }
+      }
+    } else {
+      const item: WorkItem = {
+        id: makeRequestId(),
+        module: categoryToModule(draft.category),
+        title: draft.title,
+        requester: draft.academy,
+        owner: "학원 관리자",
+        status: "접수",
+        priority,
+        due: draft.urgency === "긴급" ? "오늘" : "신규",
+        audit: "사용자 포털 접수 - 학원 관리자 승인 대기",
+        description,
+        approvalStep: 0,
+        source: "user_portal",
+        approvedByAcademyAdmin: false,
+        urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+        evidenceFiles: files.map((file) => file.name)
+      };
+
+      if (!supabase) {
+        pushToAdminQueue(item);
+      }
+      // TODO: Handle Supabase create for UserPortal if needed
+    }
+
+    await loadHistory();
+    setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "" });
     setFiles([]);
+    setIsLoading(false);
   };
 
   return (
@@ -134,8 +257,8 @@ export function UserPortal() {
             <Megaphone className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-xl font-bold">운영 요청</h1>
-            <p className="text-sm text-gray-500">필요한 일을 쉽게 접수하세요</p>
+            <h1 className="text-xl font-bold text-slate-900">경영 지원 요청</h1>
+            <p className="text-sm text-slate-500">지점별 필요한 전산 업무를 신청하세요</p>
           </div>
           <Link href="/" className="ml-auto rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50">
             관리자
@@ -183,19 +306,87 @@ export function UserPortal() {
             <div className="mt-5 grid gap-3">
               <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
                 <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder="예: 3층 빔프로젝터 화면이 깜박여요" />
-                <select value={draft.campus} onChange={(event) => setDraft({ ...draft, campus: event.target.value })} className="field" aria-label="캠퍼스">
-                  <option>강남캠퍼스</option>
-                  <option>송파캠퍼스</option>
-                  <option>분당캠퍼스</option>
-                  <option>본사</option>
+                <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
+                  <option value="" disabled>선택해주세요</option>
+                  <option>손샘학원(본사)</option>
+                  <option>손샘(수원)</option>
+                  <option>손샘(대치)</option>
+                  <option>손샘(범어)</option>
                 </select>
               </div>
-              <textarea
+              <input
                 value={draft.detail}
                 onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
-                className="min-h-32 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500"
-                placeholder="상세 내용을 적어주세요"
+                className="field"
+                placeholder={draft.category === "equipment" ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)" : "상세 내용을 한 줄로 적어주세요"}
               />
+
+              {draft.category === "equipment" && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
+                  <h3 className="mb-4 text-sm font-bold text-blue-900">💻 장비 세부 사양 선택</h3>
+                  
+                  <div className="mb-6">
+                    <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">빠른 구성 불러오기</p>
+                    <div className="flex flex-wrap gap-2">
+                      {equipmentPresets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setConfig({ ...config, parts: preset.parts })}
+                          className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm"
+                        >
+                          {preset.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5">
+                    {Object.keys(config.parts).map((category) => (
+                      <div key={category} className="grid gap-2 sm:grid-cols-[100px_1fr]">
+                        <span className="text-xs font-bold text-slate-500">{category}</span>
+                        <div className="grid gap-2">
+                          <select
+                            value={config.parts[category] || ""}
+                            onChange={(e) => updateConfig(category, e.target.value)}
+                            className="field w-full border-blue-200 text-sm"
+                          >
+                            <option value="" disabled>선택해주세요</option>
+                            {equipmentParts
+                              .filter((p) => p.category === category)
+                              .map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.tier === "고성능" ? "🚀 " : p.tier === "업무용" ? "💼 " : ""}
+                                  {p.name} (+{p.price.toLocaleString()}원)
+                                </option>
+                              ))}
+                          </select>
+                          {config.parts[category] && (
+                            <p className="rounded-lg bg-white px-3 py-2 text-[11px] leading-relaxed text-blue-700 shadow-sm border border-blue-50">
+                              <span className="font-bold">✨ 전문가 코멘트:</span> {equipmentParts.find((p) => p.id === config.parts[category])?.performanceNote}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-2 border-t border-blue-200 pt-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-blue-900">구성 합계 (VAT 별도)</span>
+                        <span className="text-lg font-black text-blue-600">{config.totalPrice.toLocaleString()}원</span>
+                      </div>
+                      <div className="mt-3 rounded-lg bg-white p-3 text-xs text-blue-800">
+                        {config.totalPrice > 1000000 ? (
+                          <p><strong>🚀 고성능:</strong> 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
+                        ) : config.totalPrice > 600000 ? (
+                          <p><strong>💼 표준:</strong> 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
+                        ) : (
+                          <p><strong>📝 기본:</strong> 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 {(["보통", "빠름", "긴급"] as const).map((urgency) => (
                   <button
@@ -230,25 +421,23 @@ export function UserPortal() {
                       value={draft.urgentReason}
                       onChange={(event) => setDraft({ ...draft, urgentReason: event.target.value })}
                       className="field mt-2 w-full"
-                      placeholder="예: 오늘 3시 수업 진행 불가"
+                      placeholder="예: 오늘 3시 수업 진행 불가 (기기 작동 오류)"
                     />
                   </div>
-                  <div>
-                    <label className="text-sm font-bold text-red-800">영향 범위</label>
-                    <input
-                      value={draft.urgentImpact}
-                      onChange={(event) => setDraft({ ...draft, urgentImpact: event.target.value })}
-                      className="field mt-2 w-full"
-                      placeholder="예: 4개 반, 학생 80명 영향"
-                    />
-                  </div>
-                  <p className="text-xs text-red-700">긴급 요청은 사유와 영향 범위를 적고 가능하면 사진/문서를 첨부해야 합니다.</p>
+                  <p className="text-xs text-red-700">긴급 요청 시에는 우선 처리를 위한 구체적인 사유를 적어주세요.</p>
                 </div>
               ) : null}
-              <button onClick={submit} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700">
-                요청 접수
+              <button onClick={submit} disabled={isLoading} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+                {draft.resubmitId ? "수정하여 재접수" : "요청 접수"}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
+              <button
+                onClick={() => setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "" })}
+                className="text-center text-sm font-semibold text-gray-500 hover:text-gray-800"
+              >
+                취소하고 새로 작성하기
+              </button>
+              )}
             </div>
           </section>
         </section>
@@ -278,13 +467,24 @@ export function UserPortal() {
             </div>
             <div className="mt-3 grid gap-2">
               {submitted.length ? (
-                submitted.map((item, index) => (
-                  <div key={`${item.title}-${index}`} className="rounded-lg border border-gray-200 p-3">
+                submitted.map((item) => (
+                  <div key={item.id} className={`rounded-lg border p-3 ${item.status === "보류" ? "border-rose-200 bg-rose-50" : "border-gray-200 bg-white"}`}>
                     <div className="flex items-start gap-2">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" aria-hidden="true" />
-                      <div>
-                        <p className="text-sm font-semibold">{item.title}</p>
-                        <p className="text-xs text-gray-500">{item.campus} · 접수됨</p>
+                      <CheckCircle2 className={`mt-0.5 h-4 w-4 ${item.status === "완료" ? "text-green-600" : item.status === "보류" ? "text-rose-600" : "text-blue-600"}`} aria-hidden="true" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold">{item.title}</p>
+                        <p className="text-xs text-gray-500">{item.campus} · {item.status}</p>
+                        {item.status === "보류" && (
+                          <div className="mt-2">
+                            {item.rejectionNote && <p className="mb-2 text-xs font-medium text-rose-700">보류 사유: {item.rejectionNote}</p>}
+                            <button
+                              onClick={() => loadForResubmit(item)}
+                              className="inline-flex h-7 items-center justify-center rounded-md bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-700"
+                            >
+                              불러오기 및 수정
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -329,6 +529,30 @@ function pushToAdminQueue(item: WorkItem) {
           at,
           actor: "사용자 포털",
           event: `${item.id} ${item.title} 접수`
+        },
+        ...audit
+      ]
+    })
+  );
+}
+
+function updateInAdminQueue(updated: WorkItem) {
+  const raw = window.localStorage.getItem(adminStorageKey);
+  const parsed = raw ? JSON.parse(raw) as { items?: WorkItem[]; audit?: Array<{ id: string; at: string; actor: string; event: string }> } : {};
+  const items = parsed.items ?? [];
+  const audit = parsed.audit ?? [];
+  const at = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+
+  window.localStorage.setItem(
+    adminStorageKey,
+    JSON.stringify({
+      items: items.map(p => p.id === updated.id ? updated : p),
+      audit: [
+        {
+          id: `AUD-${Date.now()}`,
+          at,
+          actor: "사용자 포털",
+          event: `${updated.id} 재접수`
         },
         ...audit
       ]

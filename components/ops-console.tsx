@@ -26,7 +26,14 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { aiHarnessSteps, equipmentParts, modules, nasMetrics, workItems as seedItems } from "@/lib/ops-data";
+import { 
+  aiHarnessSteps, 
+  equipmentParts, 
+  equipmentPresets,
+  modules, 
+  nasMetrics, 
+  workItems as seedItems 
+} from "@/lib/ops-data";
 import { createClient } from "@/lib/supabase";
 import {
   createRequest as createDbRequest,
@@ -40,14 +47,14 @@ import { StatusPill } from "@/components/status-pill";
 import type { EquipmentConfig, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
-type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "subly" | "nas" | "audit";
+type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "nas" | "audit";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = {
   item: string;
   count: number;
   unitPrice: number;
-  campus: string;
+  academy: string;
   neededDate: string;
   processType: string;
   userName: string;
@@ -55,7 +62,6 @@ type EquipmentForm = {
   roles: string[];
   notes: string;
 };
-type SublyForm = { item: string; quantity: number; vendor: string; delivery: string };
 type WebDavTargetInput = {
   id: string;
   name: string;
@@ -93,7 +99,6 @@ const menuItems: { key: MenuKey; label: string; icon: LucideIcon }[] = [
   { key: "queue", label: "요청 큐", icon: ClipboardList },
   { key: "equipment", label: "장비 구매", icon: PackageCheck },
   { key: "as", label: "A/S", icon: Stethoscope },
-  { key: "subly", label: "서블리", icon: Printer },
   { key: "nas", label: "NAS", icon: HardDrive },
   { key: "audit", label: "감사/AI", icon: Activity }
 ];
@@ -108,7 +113,7 @@ const initialAudit: AuditEvent[] = [
 const defaultForm: RequestForm = {
   module: "전산 장비",
   title: "",
-  requester: "강남캠퍼스",
+  requester: "손샘학원(본사)",
   priority: "보통",
   description: "",
   amount: "",
@@ -174,9 +179,10 @@ export function OpsConsole() {
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
-  const [syncState, setSyncState] = useState("데모 모드");
+  const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
+  const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
   const [audit, setAudit] = useState<AuditEvent[]>(initialAudit);
   const [query, setQuery] = useState("");
@@ -184,10 +190,10 @@ export function OpsConsole() {
   const [selectedId, setSelectedId] = useState(seedItems[0]?.id ?? "");
   const [form, setForm] = useState<RequestForm>(defaultForm);
   const [equipment, setEquipment] = useState<EquipmentForm>({
-    item: "노트북",
-    count: 12,
-    unitPrice: 1500000,
-    campus: "강남캠퍼스",
+    item: "",
+    count: 1,
+    unitPrice: 0,
+    academy: "",
     neededDate: new Date().toISOString().slice(0, 10),
     processType: "신규 구매",
     userName: "",
@@ -195,8 +201,6 @@ export function OpsConsole() {
     roles: ["데스크"],
     notes: ""
   });
-  const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
-  const [subly, setSubly] = useState<SublyForm>({ item: "겨울 방학 홍보물", quantity: 1500, vendor: "Subly Print", delivery: "4월 30일" });
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
   const [webdav, setWebdav] = useState<WebDavResult | null>(null);
   const [webdavLoading, setWebdavLoading] = useState(false);
@@ -212,6 +216,8 @@ export function OpsConsole() {
     username: "",
     password: ""
   });
+  const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
+  const [showWebDavModal, setShowWebDavModal] = useState(false);
   const [config, setConfig] = useState<EquipmentConfig>({
     parts: { 
       CPU: "cpu-2", 
@@ -491,29 +497,18 @@ export function OpsConsole() {
 
   const createAsTicket = () => addRequest({
     module: "A/S",
-    title: `${diagnosis.category} A/S 접수`,
-    requester: "운영팀",
+    title: symptom,
+    requester: "손샘학원(본사)",
     owner: "전산",
     status: diagnosis.escalation ? "진행" : "검토",
     priority: diagnosis.escalation ? "높음" : "보통",
-    due: "내일",
-    audit: diagnosis.escalation ? "FAQ 후 업체 접수 필요" : "FAQ 가이드 우선 안내",
+    due: "신규",
+    audit: diagnosis.escalation ? "AI 진단 후 전산 배정" : "FAQ 가이드 우선 안내",
     description: `${symptom}\n\nAI 진단: ${diagnosis.answer}`,
-    vendor: diagnosis.escalation ? "협력 업체 배정 대기" : "내부 처리"
-  });
-
-  const createSubly = () => addRequest({
-    module: "서블리",
-    title: `${subly.item} ${subly.quantity.toLocaleString("ko-KR")}부 제작`,
-    requester: "마케팅",
-    owner: "구매",
-    status: "검토",
-    priority: subly.quantity >= 2000 ? "높음" : "보통",
-    due: subly.delivery,
-    audit: "견적 요청서 생성",
-    amount: `${subly.quantity.toLocaleString("ko-KR")}부`,
-    vendor: subly.vendor,
-    description: "견적 수령 후 경영 승인, 발주, 배송 완료 순서로 진행"
+    vendor: diagnosis.escalation ? "협력 업체 배정 대기" : "내부 처리",
+    amount: "0",
+    approvalStep: 0,
+    source: "admin_console"
   });
 
   const createNasRequest = () => addRequest({
@@ -562,11 +557,36 @@ export function OpsConsole() {
       id: webdavDraft.id || webdavDraft.name.replace(/\s+/g, "-").toLowerCase()
     };
     setWebdavTargets((current) => [next, ...current.filter((item) => item.id !== next.id)]);
-    setWebdavDraft({ id: "", name: "", protocol: "https", host: "", port: "5006", path: "/webdav/", url: "", username: "", password: "" });
+    setWebdavDraft({ id: "", name: "", protocol: "https", host: "", port: "5006", path: "/", url: "", username: "", password: "" });
+    setEditingTargetId(null);
+    setShowWebDavModal(false);
+  };
+
+  const startEditWebDavTarget = (target: WebDavTargetInput) => {
+    setEditingTargetId(target.id);
+    setWebdavDraft(target);
+    setShowWebDavModal(true);
+  };
+
+  const cancelEditWebDavTarget = () => {
+    setEditingTargetId(null);
+    setShowWebDavModal(false);
+    setWebdavDraft({ id: "", name: "", protocol: "https", host: "", port: "5006", path: "/", url: "", username: "", password: "" });
   };
 
   const removeWebDavTarget = (id: string) => {
     setWebdavTargets((current) => current.filter((item) => item.id !== id));
+    if (editingTargetId === id) cancelEditWebDavTarget();
+  };
+
+  const disconnectWebDav = (id: string) => {
+    // Simulating disconnection by resetting the result in the UI
+    if (webdav?.targets) {
+        setWebdav({
+            ...webdav,
+            targets: webdav.targets.filter(t => t.id !== id)
+        });
+    }
   };
 
   const resetLocal = () => {
@@ -612,12 +632,12 @@ export function OpsConsole() {
       <header className="sticky top-0 z-30 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Academy Ops Hub</p>
-            <h1 className="text-xl font-bold">운영 통합 콘솔</h1>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">EduOS Manager</p>
+            <h1 className="text-xl font-black tracking-tight text-slate-900">경영지원 관리 시스템</h1>
           </div>
           <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 md:flex">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 캠퍼스, 담당 검색" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 학원, 담당 검색" />
           </div>
           <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold">
             {roles.find((item) => item.value === role)?.label ?? "관리자"}
@@ -638,8 +658,8 @@ export function OpsConsole() {
                   <HardDrive className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <div>
-                  <p className="font-bold">Ops Hub</p>
-                  <p className="text-xs text-gray-500">v0.1.0</p>
+                  <p className="font-bold">경영 지원 요청</p>
+                  <p className="text-xs text-gray-500">지점별 필요한 행정/운영 업무를 신청하세요</p>
                 </div>
               </div>
               <div className="mt-4 space-y-2">
@@ -690,10 +710,30 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} updateConfig={updateConfig} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
-              {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
-              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} webdav={webdav} webdavLoading={webdavLoading} checkWebDav={checkWebDav} webdavTargets={webdavTargets} webdavDraft={webdavDraft} setWebdavDraft={setWebdavDraft} addWebDavTarget={addWebDavTarget} removeWebDavTarget={removeWebDavTarget} /> : null}
+              {activeMenu === "nas" ? (
+                <NasScreen 
+                  nasUser={nasUser} 
+                  setNasUser={setNasUser} 
+                  createNasRequest={createNasRequest} 
+                  webdav={webdav} 
+                  webdavLoading={webdavLoading} 
+                  checkWebDav={checkWebDav} 
+                  webdavTargets={webdavTargets} 
+                  webdavDraft={webdavDraft} 
+                  setWebdavDraft={setWebdavDraft} 
+                  addWebDavTarget={addWebDavTarget} 
+                  removeWebDavTarget={removeWebDavTarget} 
+                  editingTargetId={editingTargetId}
+                  startEditWebDavTarget={startEditWebDavTarget}
+                  cancelEditWebDavTarget={cancelEditWebDavTarget}
+                  disconnectWebDav={disconnectWebDav}
+                  showWebDavModal={showWebDavModal}
+                  setShowWebDavModal={setShowWebDavModal}
+                  setEditingTargetId={setEditingTargetId}
+                />
+              ) : null}
               {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
             </>
           )}
@@ -930,12 +970,14 @@ function EquipmentScreen({
   setEquipment,
   createEquipment,
   config,
+  setConfig,
   updateConfig
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
   createEquipment: () => void;
   config: EquipmentConfig;
+  setConfig: (config: EquipmentConfig) => void;
   updateConfig: (category: string, partId: string) => void;
 }) {
   const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
@@ -962,8 +1004,8 @@ function EquipmentScreen({
           </div>
 
           <div className="divide-y divide-slate-200">
-            <EquipmentRow label="캠퍼스">
-              <input value={equipment.campus} onChange={(event) => setEquipment({ ...equipment, campus: event.target.value })} className="field w-full" placeholder="강남캠퍼스" />
+            <EquipmentRow label="학원/지점">
+              <input value={equipment.academy} onChange={(event) => setEquipment({ ...equipment, academy: event.target.value })} className="field w-full" placeholder="손샘학원(대구)" />
             </EquipmentRow>
             <EquipmentRow label="품목">
               <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
@@ -980,6 +1022,23 @@ function EquipmentScreen({
             {isCustomizable ? (
               <div className="bg-blue-50/30 p-5">
                 <h4 className="mb-4 text-sm font-bold text-blue-900">커스텀 사양 빌더</h4>
+                
+                <div className="mb-6">
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">빠른 구성 불러오기</p>
+                  <div className="flex flex-wrap gap-2">
+                    {equipmentPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setConfig({ ...config, parts: preset.parts })}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm"
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid gap-6">
                   {Object.keys(config.parts).map((category) => (
                     <div key={category} className="grid gap-2 sm:grid-cols-[120px_1fr]">
@@ -1027,7 +1086,7 @@ function EquipmentScreen({
             </EquipmentRow>
 
             <EquipmentRow label="기타 전달 사항">
-              <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
+              <input value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="field w-full" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
             </EquipmentRow>
           </div>
 
@@ -1074,11 +1133,11 @@ function EquipmentScreen({
             </h4>
             <div className="mt-4 rounded-xl bg-blue-50 p-4 text-xs text-blue-900">
               {config.totalPrice > 1000000 ? (
-                <p>현재 구성은 <strong>[고성능 워크스테이션]</strong> 등급입니다. 전문적인 작업(디자인, 개발)이 필요한 직무에 권장합니다.</p>
+                <p>현재 구성은 <strong>[고성능]</strong> 등급입니다. 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
               ) : config.totalPrice > 600000 ? (
-                <p>현재 구성은 <strong>[표준 비즈니스]</strong> 등급입니다. 일반적인 학원 행정 및 엑셀 작업에 최적화되어 있습니다.</p>
+                <p>현재 구성은 <strong>[표준]</strong> 등급입니다. 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
               ) : (
-                <p>현재 구성은 <strong>[엔트리/단순 업무]</strong> 등급입니다. 웹서핑, 간단한 문서 조회용으로 적합합니다.</p>
+                <p>현재 구성은 <strong>[기본]</strong> 등급입니다. 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
               )}
             </div>
           </div>
@@ -1109,21 +1168,6 @@ function AsScreen({ symptom, setSymptom, diagnosis, createAsTicket }: { symptom:
   );
 }
 
-function SublyScreen({ subly, setSubly, createSubly }: { subly: SublyForm; setSubly: (value: SublyForm) => void; createSubly: () => void }) {
-  return (
-    <Screen title="서블리" desc="제작물 견적 요청, 승인, 발주, 배송 추적을 시작합니다.">
-      <FormPanel icon={Printer} title="견적 요청서">
-        <input value={subly.item} onChange={(event) => setSubly({ ...subly, item: event.target.value })} className="field" aria-label="제작물" />
-        <div className="grid grid-cols-2 gap-2">
-          <input type="number" value={subly.quantity} onChange={(event) => setSubly({ ...subly, quantity: Number(event.target.value) })} className="field" aria-label="부수" />
-          <input value={subly.delivery} onChange={(event) => setSubly({ ...subly, delivery: event.target.value })} className="field" aria-label="납기" />
-        </div>
-        <input value={subly.vendor} onChange={(event) => setSubly({ ...subly, vendor: event.target.value })} className="field" aria-label="업체" />
-        <ActionButton onClick={createSubly} label="견적 요청 생성" />
-      </FormPanel>
-    </Screen>
-  );
-}
 
 function NasScreen({
   nasUser,
@@ -1136,7 +1180,14 @@ function NasScreen({
   webdavDraft,
   setWebdavDraft,
   addWebDavTarget,
-  removeWebDavTarget
+  removeWebDavTarget,
+  editingTargetId,
+  startEditWebDavTarget,
+  cancelEditWebDavTarget,
+  disconnectWebDav,
+  showWebDavModal,
+  setShowWebDavModal,
+  setEditingTargetId
 }: {
   nasUser: string;
   setNasUser: (value: string) => void;
@@ -1149,143 +1200,192 @@ function NasScreen({
   setWebdavDraft: (value: WebDavTargetInput) => void;
   addWebDavTarget: () => void;
   removeWebDavTarget: (id: string) => void;
+  editingTargetId: string | null;
+  startEditWebDavTarget: (target: WebDavTargetInput) => void;
+  cancelEditWebDavTarget: () => void;
+  disconnectWebDav: (id: string) => void;
+  showWebDavModal: boolean;
+  setShowWebDavModal: (value: boolean) => void;
+  setEditingTargetId: (id: string | null) => void;
 }) {
   return (
-    <Screen title="NAS" desc="용량과 권한 상태를 확인하고 접속 권한 요청을 생성합니다.">
+    <Screen title="NAS" desc="멀티 학원 환경을 중앙에서 한눈에 관리하고 연결 상태를 실시간 제어합니다.">
       <section className="grid gap-5">
-        <div className="grid gap-3 md:grid-cols-3">
+        {showWebDavModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg animate-in fade-in zoom-in duration-200">
+               <FormPanel icon={editingTargetId ? RefreshCw : HardDrive} title={editingTargetId ? "WebDAV 연결 수정" : "새로운 WebDAV 타겟 추가"}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-slate-500 mb-2 leading-relaxed">WebDAV 프로토콜을 통해 NAS 서버를 중앙 관리 큐에 연결합니다.</p>
+                  </div>
+                  
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">표시 이름</label>
+                        <input value={webdavDraft.name} onChange={(event) => setWebdavDraft({ ...webdavDraft, name: event.target.value })} className="field" placeholder="예) 3층 교강사실 NAS" />
+                    </div>
+
+                    <div className="grid gap-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">연결 주소 및 경로</label>
+                        <div className="grid grid-cols-[100px_1fr] gap-2">
+                            <select value={webdavDraft.protocol} onChange={(event) => setWebdavDraft({ ...webdavDraft, protocol: event.target.value as "https" | "http", port: event.target.value === "https" ? "5006" : "5005" })} className="field text-xs">
+                                <option value="https">HTTPS</option>
+                                <option value="http">HTTP</option>
+                            </select>
+                            <input value={webdavDraft.host} onChange={(event) => setWebdavDraft({ ...webdavDraft, host: event.target.value })} className="field text-sm" placeholder="NAS 도메인 또는 IP" />
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-2">
+                            <input value={webdavDraft.port} onChange={(event) => setWebdavDraft({ ...webdavDraft, port: event.target.value })} className="field text-sm" placeholder="포트" />
+                            <input value={webdavDraft.path} onChange={(event) => setWebdavDraft({ ...webdavDraft, path: event.target.value })} className="field text-sm" placeholder="경로 (예: /)" />
+                        </div>
+                        <p className="rounded-xl bg-blue-50 p-2 text-[10px] font-medium text-blue-700">
+                            <strong>🔗 생성된 URL:</strong> {buildWebDavUrl(webdavDraft) || "주소를 입력하세요"}
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">접속 아이디</label>
+                            <input value={webdavDraft.username} onChange={(event) => setWebdavDraft({ ...webdavDraft, username: event.target.value })} className="field text-sm" placeholder="WebDAV 아이디" />
+                        </div>
+                        <div className="grid gap-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">패스워드</label>
+                            <input value={webdavDraft.password} onChange={(event) => setWebdavDraft({ ...webdavDraft, password: event.target.value })} className="field text-sm" placeholder="비밀번호" type="password" />
+                        </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex gap-3">
+                    <button onClick={cancelEditWebDavTarget} className="flex-1 h-11 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50">취소</button>
+                    <button onClick={addWebDavTarget} className="flex-[2] h-11 rounded-xl bg-blue-600 text-sm font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-200">
+                        {editingTargetId ? "정보 업데이트" : "연결 활성화"}
+                    </button>
+                  </div>
+               </FormPanel>
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-3">
           {nasMetrics.map((metric) => (
-            <article key={metric.label} className="surface-strong rounded-2xl p-5">
+            <article key={metric.label} className="surface-strong rounded-2xl p-6 shadow-sm">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-600">{metric.label}</span>
-                <HardDrive className="h-5 w-5 text-gray-500" aria-hidden="true" />
+                <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">{metric.label}</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
+                  <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
+                </div>
               </div>
-              <div className="mt-4 text-3xl font-bold">{metric.value}</div>
-              <p className="mt-1 text-xs text-gray-500">{metric.detail}</p>
-              <div className="mt-3 progress-track">
-                <div className={`h-full rounded-full ${metric.health === "주의" ? "bg-yellow-500" : metric.health === "위험" ? "bg-red-500" : "bg-green-500"}`} style={{ width: metric.value.includes("%") ? metric.value : "62%" }} />
+              <div className="mt-4 text-3xl font-black">{metric.value}</div>
+              <p className="mt-1 text-xs font-semibold text-gray-400">{metric.detail}</p>
+              <div className="mt-4 progress-track bg-slate-100">
+                <div className={`h-full rounded-full transition-all duration-500 ${metric.health === "주의" ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]" : metric.health === "위험" ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : "bg-emerald-500"}`} style={{ width: metric.value.includes("%") ? metric.value : "62%" }} />
               </div>
             </article>
           ))}
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="surface-strong rounded-2xl p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-                  <Server className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <div>
-                  <h3 className="font-bold">WebDAV 연결 확인</h3>
-                  <p className="text-sm text-gray-500">NAS_WEBDAV_URL 환경변수로 실제 NAS 상태를 확인합니다.</p>
-                </div>
-              </div>
-              <button onClick={checkWebDav} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">
-                <RefreshCw className={`h-4 w-4 ${webdavLoading ? "animate-spin" : ""}`} aria-hidden="true" />
-                확인
-              </button>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold">상태</p>
-                  <p className="text-sm text-gray-500">{webdav?.message ?? "아직 확인하지 않았습니다."}</p>
-                </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${webdav?.ok ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"}`}>
-                  {webdav?.ok ? "연결됨" : webdav?.configured === false ? "설정 필요" : "대기"}
-                </span>
-              </div>
-              {webdav?.latencyMs ? <p className="mt-2 text-xs text-gray-500">응답 {webdav.latencyMs}ms · HTTP {webdav.status ?? "-"}</p> : null}
-            </div>
-
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              {(webdav?.targets ?? []).map((target) => (
-                <div key={target.id} className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-bold">{target.name}</p>
-                      <p className="text-xs text-gray-500">{target.message}</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-xs font-bold ${target.ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                      {target.ok ? "온라인" : "오프라인"}
-                    </span>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="space-y-6">
+            <section className="surface-strong rounded-2xl p-6 shadow-sm border border-slate-100">
+              <div className="mb-8 flex flex-wrap items-start justify-between gap-y-4 gap-x-2">
+                <div className="flex items-center gap-4 min-w-[240px]">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+                    <Server className="h-6 w-6" aria-hidden="true" />
                   </div>
-                  <p className="mt-2 text-xs text-gray-500">HTTP {target.status ?? "-"} · {target.latencyMs ?? "-"}ms · {target.items.length} items</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid gap-2">
-              {(webdav?.items ?? []).length ? (
-                webdav!.items.map((item) => (
-                  <div key={`${item.path}-${item.name}`} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <FolderOpen className={`h-4 w-4 ${item.type === "folder" ? "text-blue-600" : "text-gray-500"}`} aria-hidden="true" />
-                      <span className="truncate font-medium">{item.name}</span>
-                      {item.targetName ? <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">{item.targetName}</span> : null}
-                    </div>
-                    <span className="text-xs text-gray-500">{item.size ? `${Math.round(item.size / 1024)}KB` : item.type}</span>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-black tracking-tight text-slate-900 leading-tight">네트워크 스토리지 상태</h3>
+                    <p className="text-xs font-medium text-slate-500 mt-0.5">실시간 연결 및 타겟 제어</p>
                   </div>
-                ))
-              ) : (
-                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">WebDAV 항목 없음</p>
-              )}
-            </div>
-          </section>
-
-          <div className="grid gap-5">
-            <FormPanel icon={HardDrive} title="WebDAV 추가">
-              <input value={webdavDraft.name} onChange={(event) => setWebdavDraft({ ...webdavDraft, name: event.target.value })} className="field" placeholder="표시 이름: 메인 NAS" />
-              <input value={webdavDraft.id} onChange={(event) => setWebdavDraft({ ...webdavDraft, id: event.target.value })} className="field" placeholder="식별자: main" />
-              <div className="grid grid-cols-[100px_1fr] gap-2">
-                <select value={webdavDraft.protocol} onChange={(event) => setWebdavDraft({ ...webdavDraft, protocol: event.target.value as "https" | "http", port: event.target.value === "https" ? "5006" : "5005" })} className="field" aria-label="프로토콜">
-                  <option value="https">https</option>
-                  <option value="http">http</option>
-                </select>
-                <input value={webdavDraft.host} onChange={(event) => setWebdavDraft({ ...webdavDraft, host: event.target.value })} className="field" placeholder="NAS 주소: 192.168.0.25 또는 nas.example.com" />
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button onClick={checkWebDav} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-700 transition-all shadow-md shadow-blue-100 active:scale-95">
+                    <RefreshCw className={`h-3.5 w-3.5 ${webdavLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+                    상태 동기화
+                  </button>
+                  <button onClick={() => { setEditingTargetId(null); setWebdavDraft({ id: "", name: "", protocol: "https", host: "", port: "5006", path: "/", url: "", username: "", password: "" }); setShowWebDavModal(true); }} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-4 text-xs font-bold text-blue-600 hover:bg-blue-50 transition-all active:scale-95">
+                    <FilePlus2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    새 타겟 추가
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-[110px_1fr] gap-2">
-                <input value={webdavDraft.port} onChange={(event) => setWebdavDraft({ ...webdavDraft, port: event.target.value })} className="field" placeholder="포트" />
-                <input value={webdavDraft.path} onChange={(event) => setWebdavDraft({ ...webdavDraft, path: event.target.value })} className="field" placeholder="경로: /webdav/" />
-              </div>
-              <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-800">
-                연결 URL: {buildWebDavUrl(webdavDraft) || "주소를 입력하세요"}
-              </p>
-              <input value={webdavDraft.username} onChange={(event) => setWebdavDraft({ ...webdavDraft, username: event.target.value })} className="field" placeholder="아이디" />
-              <input value={webdavDraft.password} onChange={(event) => setWebdavDraft({ ...webdavDraft, password: event.target.value })} className="field" placeholder="비밀번호" type="password" />
-              <ActionButton onClick={addWebDavTarget} label="WebDAV 추가" />
-            </FormPanel>
 
-            <section className="surface-strong rounded-2xl p-5">
-              <h3 className="font-bold">등록된 WebDAV</h3>
-              <div className="mt-3 grid gap-2">
-                {webdavTargets.length ? (
-                  webdavTargets.map((target) => (
-                    <div key={target.id} className="rounded-xl border border-gray-200 p-3">
-                      <div className="flex items-start justify-between gap-2">
+              <div className="grid gap-4 md:grid-cols-2">
+                {webdavTargets.map((target) => {
+                  const result = webdav?.targets?.find(t => t.id === target.id);
+                  const isOnline = !!result?.ok;
+                  
+                  return (
+                    <article key={target.id} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 hover:border-blue-200 hover:shadow-md transition-all">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="font-semibold">{target.name}</p>
-                          <p className="truncate text-xs text-gray-500">{target.url}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-extrabold text-slate-900">{target.name}</p>
+                            <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-emerald-500 ring-4 ring-emerald-50" : "bg-slate-300"}`} />
+                          </div>
+                          <p className="mt-2 whitespace-nowrap text-[10px] font-medium text-slate-400 tabular-nums tracking-tight">{target.url}</p>
                         </div>
-                        <button onClick={() => removeWebDavTarget(target.id)} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold hover:bg-gray-50">
-                          삭제
-                        </button>
+                        <div className={`rounded-xl px-2.5 py-1 text-[10px] font-black uppercase ${isOnline ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-500"}`}>
+                          {isOnline ? "Online" : "Offline"}
+                        </div>
                       </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-500">등록된 WebDAV가 없습니다. 환경변수 또는 직접 추가를 사용할 수 있습니다.</p>
-                )}
-              </div>
-            </section>
+                      
+                      {isOnline && (
+                        <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-3">
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Latency</p>
+                            <p className="text-sm font-black text-slate-700">{result?.latencyMs}ms</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Stored Files</p>
+                            <p className="text-sm font-black text-slate-700">{result?.items.length} units</p>
+                          </div>
+                        </div>
+                      )}
 
-            <FormPanel icon={HardDrive} title="권한 요청">
-              <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field" aria-label="NAS 사용자" />
-              <ActionButton onClick={createNasRequest} label="권한 요청 생성" />
-            </FormPanel>
+                      <div className="mt-4 flex gap-2">
+                        <button onClick={() => startEditWebDavTarget(target)} className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50">설정 수정</button>
+                        {isOnline ? (
+                            <button onClick={() => disconnectWebDav(target.id)} className="flex-1 rounded-xl bg-rose-50 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-100">연결 끊기</button>
+                        ) : (
+                            <button onClick={() => removeWebDavTarget(target.id)} className="rounded-xl border border-rose-100 bg-white px-3 py-2 text-[11px] font-bold text-rose-400 hover:bg-rose-50">삭제</button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              {(webdav?.items ?? []).length > 0 && (
+                <div className="mt-6">
+                    <h4 className="text-sm font-bold text-slate-800 mb-3">최근 파일 시스템 노출</h4>
+                    <div className="grid gap-2">
+                        {webdav!.items.slice(0, 5).map((item) => (
+                            <div key={`${item.path}-${item.name}`} className="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm hover:translate-x-1 transition">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${item.type === "folder" ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-500"}`}>
+                                        <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                                    </div>
+                                    <div>
+                                        <p className="truncate font-bold text-slate-800">{item.name}</p>
+                                        <p className="text-[10px] text-slate-400">{item.targetName || "Storage Source"}</p>
+                                    </div>
+                                </div>
+                                <span className="text-[11px] font-bold text-slate-400">{item.size ? `${Math.round(item.size / 1024)}KB` : "DIR"}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+              )}
+            </section>
           </div>
+
+          <aside className="space-y-6">
+            <FormPanel icon={ShieldCheck} title="신규 사용자 권한 발급">
+              <p className="text-xs text-slate-500 mb-3 leading-relaxed">특정 이메일 계정에 NAS 접속 권한 및 가이드를 자동으로 전송합니다.</p>
+              <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field mb-1" placeholder="직원 이메일: email@academy.local" />
+              <ActionButton onClick={createNasRequest} label="권한 발급용 티켓 생성" />
+            </FormPanel>
+          </aside>
         </div>
       </section>
     </Screen>
