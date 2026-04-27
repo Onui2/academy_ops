@@ -538,7 +538,7 @@ export function OpsConsole() {
           </div>
           <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 md:flex">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="요청 번호, 캠퍼스, 담당 검색" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 캠퍼스, 담당 검색" />
           </div>
           <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold">
             {roles.find((item) => item.value === role)?.label ?? "관리자"}
@@ -801,14 +801,13 @@ function QueueTable(props: {
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[850px] border-collapse text-sm">
+        <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead className="bg-slate-50/80 text-left text-xs uppercase text-slate-500">
-            <tr><th className="px-4 py-3">번호</th><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
+            <tr><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
           </thead>
           <tbody>
             {props.items.map((item) => (
               <tr key={item.id} className="border-t border-border hover:bg-blue-50/40">
-                <td className="px-4 py-3 font-bold text-blue-700">{item.id}</td>
                 <td className="px-4 py-3">
                   <button onClick={() => props.openDetail(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
                   <div className="mt-1 text-xs text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
@@ -1102,8 +1101,13 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
   return (
     <section>
       <div className="flex items-start justify-between gap-3">
-        <div><p className="text-xs font-bold text-blue-700">{item.id}</p><h3 className="mt-1 font-bold">{item.title}</h3></div>
-        <StatusPill status={item.status} />
+        <div><p className="text-xs font-bold text-blue-700">업무 번호 {item.id}</p><h3 className="mt-1 font-bold">{item.title}</h3></div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => printWorkItem(item)} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-slate-600 hover:bg-gray-50" aria-label="업무 출력">
+            <Printer className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <StatusPill status={item.status} />
+        </div>
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <Info label="모듈" value={item.module} /><Info label="요청자" value={item.requester} /><Info label="담당" value={item.owner} /><Info label="우선순위" value={item.priority} /><Info label="예산/수량" value={item.amount || "-"} /><Info label="업체" value={item.vendor || "-"} />
@@ -1126,6 +1130,67 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
       </div>
     </section>
   );
+}
+
+function printWorkItem(item: WorkItem) {
+  const popup = window.open("", "_blank", "width=760,height=900");
+  if (!popup) {
+    window.print();
+    return;
+  }
+
+  const rows = [
+    ["업무 번호", item.id],
+    ["상태", item.status],
+    ["모듈", item.module],
+    ["요청자", item.requester],
+    ["담당", item.owner],
+    ["우선순위", item.priority],
+    ["기한", item.due],
+    ["예산/수량", item.amount || "-"],
+    ["업체", item.vendor || "-"],
+    ["승인 의견", item.approvalNote || "-"]
+  ];
+
+  if (item.priority === "긴급") {
+    rows.push(["긴급 사유", item.urgentReason || "미작성"]);
+    rows.push(["영향 범위", item.urgentImpact || "미작성"]);
+    rows.push(["증빙 파일", item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"]);
+  }
+
+  popup.document.write(`<!doctype html>
+    <html lang="ko">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(item.id)} 업무 접수증</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 32px; color: #0f172a; }
+          h1 { margin: 0 0 8px; font-size: 24px; }
+          .muted { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th, td { border: 1px solid #d8dee9; padding: 10px 12px; text-align: left; vertical-align: top; }
+          th { width: 140px; background: #f8fafc; }
+          .desc { margin-top: 16px; padding: 14px; border: 1px solid #d8dee9; white-space: pre-wrap; }
+          @media print { button { display: none; } body { margin: 20px; } }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(item.title)}</h1>
+        <div class="muted">Academy Ops Hub 업무 접수증</div>
+        <table>
+          <tbody>
+            ${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join("")}
+          </tbody>
+        </table>
+        <div class="desc">${escapeHtml(item.description || item.audit)}</div>
+        <script>window.onload = () => { window.print(); };</script>
+      </body>
+    </html>`);
+  popup.document.close();
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
 }
 
 function ApprovalNoteForm({ item, onSubmit, onCancel }: { item: WorkItem; onSubmit: (note: string) => void; onCancel: () => void }) {
