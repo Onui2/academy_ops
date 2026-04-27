@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertTriangle,
+  CalendarDays,
   Check,
   ClipboardList,
   FilePlus2,
@@ -41,7 +42,18 @@ import type { User } from "@supabase/supabase-js";
 type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "subly" | "nas" | "audit";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
-type EquipmentForm = { item: string; count: number; unitPrice: number; campus: string };
+type EquipmentForm = {
+  item: string;
+  count: number;
+  unitPrice: number;
+  campus: string;
+  neededDate: string;
+  processType: string;
+  userName: string;
+  purpose: string;
+  roles: string[];
+  notes: string;
+};
 type SublyForm = { item: string; quantity: number; vendor: string; delivery: string };
 type WebDavTargetInput = {
   id: string;
@@ -170,7 +182,18 @@ export function OpsConsole() {
   const [status, setStatus] = useState<WorkStatus | "전체">("전체");
   const [selectedId, setSelectedId] = useState(seedItems[0]?.id ?? "");
   const [form, setForm] = useState<RequestForm>(defaultForm);
-  const [equipment, setEquipment] = useState<EquipmentForm>({ item: "노트북", count: 12, unitPrice: 1500000, campus: "강남캠퍼스" });
+  const [equipment, setEquipment] = useState<EquipmentForm>({
+    item: "노트북",
+    count: 12,
+    unitPrice: 1500000,
+    campus: "강남캠퍼스",
+    neededDate: new Date().toISOString().slice(0, 10),
+    processType: "신규 구매",
+    userName: "",
+    purpose: "",
+    roles: ["데스크"],
+    notes: ""
+  });
   const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [subly, setSubly] = useState<SublyForm>({ item: "겨울 방학 홍보물", quantity: 1500, vendor: "Subly Print", delivery: "4월 30일" });
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
@@ -401,10 +424,19 @@ export function OpsConsole() {
       owner: "경영지원",
       status: total >= 10000000 ? "승인 대기" : "검토",
       priority: total >= 10000000 ? "높음" : "보통",
-      due: "이번 주",
+      due: equipment.neededDate || "이번 주",
       audit: "예산 산출 및 승인 라우팅 완료",
       amount: `${equipment.count}대 / ${total.toLocaleString("ko-KR")}원`,
       vendor: "미정",
+      description: [
+        `처리 분류: ${equipment.processType}`,
+        `품목: ${equipment.item}`,
+        `수량: ${equipment.count}`,
+        `장비 사용자: ${equipment.userName || "미입력"}`,
+        `사용 목적: ${equipment.purpose || "미입력"}`,
+        `직무: ${equipment.roles.length ? equipment.roles.join(", ") : "미선택"}`,
+        `전달 사항: ${equipment.notes || "없음"}`
+      ].join("\n"),
       approvalStep: total >= 10000000 ? 2 : 1,
       source: "admin_console"
     });
@@ -848,19 +880,101 @@ function QueueTable(props: {
 
 function EquipmentScreen({ equipment, setEquipment, createEquipment }: { equipment: EquipmentForm; setEquipment: (value: EquipmentForm) => void; createEquipment: () => void }) {
   const total = equipment.count * equipment.unitPrice;
+  const toggleRole = (role: string) => {
+    const exists = equipment.roles.includes(role);
+    setEquipment({ ...equipment, roles: exists ? equipment.roles.filter((item) => item !== role) : [...equipment.roles, role] });
+  };
+
   return (
-    <Screen title="장비 구매" desc="장비 수량과 예산을 입력하면 승인 단계가 자동 배정됩니다.">
-      <FormPanel icon={PackageCheck} title="구매 요청서">
-        <input value={equipment.campus} onChange={(event) => setEquipment({ ...equipment, campus: event.target.value })} className="field" aria-label="캠퍼스" />
-        <div className="grid grid-cols-2 gap-2">
-          <input value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field" aria-label="장비명" />
-          <input type="number" value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field" aria-label="수량" />
+    <Screen title="장비 구매" desc="필요 일자, 사용 목적, 대상 직무까지 입력해 승인자가 바로 판단할 수 있게 구성합니다.">
+      <section className="surface-strong max-w-3xl overflow-hidden rounded-2xl">
+        <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <PackageCheck className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <h3 className="font-bold">구매 요청서</h3>
+            <p className="text-sm text-slate-500">필수 정보가 많을수록 승인과 구매가 빨라집니다.</p>
+          </div>
         </div>
-        <input type="number" value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field" aria-label="단가" />
-        <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">총액 {total.toLocaleString("ko-KR")}원 · {total >= 10000000 ? "경영진 승인 필요" : "관리자 검토"}</p>
-        <ActionButton onClick={createEquipment} label="구매 요청 생성" />
-      </FormPanel>
+
+        <div className="divide-y divide-slate-200">
+          <EquipmentRow label="캠퍼스">
+            <input value={equipment.campus} onChange={(event) => setEquipment({ ...equipment, campus: event.target.value })} className="field w-full" placeholder="강남캠퍼스" />
+          </EquipmentRow>
+          <EquipmentRow label="필요 일자">
+            <div className="relative max-w-48">
+              <input type="date" value={equipment.neededDate} onChange={(event) => setEquipment({ ...equipment, neededDate: event.target.value })} className="field w-full pr-10" />
+              <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
+            </div>
+          </EquipmentRow>
+          <EquipmentRow label="처리 분류">
+            <select value={equipment.processType} onChange={(event) => setEquipment({ ...equipment, processType: event.target.value })} className="field w-full">
+              <option>신규 구매</option>
+              <option>교체 구매</option>
+              <option>추가 지급</option>
+              <option>고장 대체</option>
+              <option>예비 장비</option>
+            </select>
+          </EquipmentRow>
+          <EquipmentRow label="품목">
+            <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
+              <option>노트북</option>
+              <option>데스크톱</option>
+              <option>모니터</option>
+              <option>태블릿</option>
+              <option>프린터</option>
+              <option>공유기/네트워크 장비</option>
+              <option>기타 장비</option>
+            </select>
+          </EquipmentRow>
+          <EquipmentRow label="수량">
+            <input type="number" min={1} value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field w-full" placeholder="수량" />
+          </EquipmentRow>
+          <EquipmentRow label="단가">
+            <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full" placeholder="예상 단가" />
+          </EquipmentRow>
+          <EquipmentRow label="장비 사용자">
+            <div className="grid gap-3 md:grid-cols-2">
+              <input value={equipment.userName} onChange={(event) => setEquipment({ ...equipment, userName: event.target.value })} className="field w-full" placeholder="사용자명 또는 부서" />
+              <input value={equipment.purpose} onChange={(event) => setEquipment({ ...equipment, purpose: event.target.value })} className="field w-full" placeholder="사용 목적" />
+            </div>
+          </EquipmentRow>
+          <EquipmentRow label="직무">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {["관리자", "데스크", "선생님", "조교", "기타"].map((role) => (
+                <label key={role} className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input type="checkbox" checked={equipment.roles.includes(role)} onChange={() => toggleRole(role)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                  {role}
+                </label>
+              ))}
+            </div>
+          </EquipmentRow>
+          <EquipmentRow label="전달 사항">
+            <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="설치 위치, 선호 사양, 기존 장비 반납 여부 등을 적어주세요." />
+          </EquipmentRow>
+        </div>
+
+        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
+          <p className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-800">
+            총액 {total.toLocaleString("ko-KR")}원 · {total >= 10000000 ? "경영진 승인 필요" : "관리자 검토"}
+          </p>
+          <button onClick={createEquipment} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white hover:bg-blue-700">
+            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+            구매 요청 생성
+          </button>
+        </div>
+      </section>
     </Screen>
+  );
+}
+
+function EquipmentRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-3 bg-white md:grid-cols-[120px_1fr]">
+      <div className="bg-slate-50 px-5 py-4 text-sm font-bold text-slate-900">{label}</div>
+      <div className="px-4 py-3">{children}</div>
+    </div>
   );
 }
 
