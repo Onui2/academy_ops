@@ -1278,6 +1278,20 @@ function DecisionNoteForm({ item, mode, onSubmit, onCancel }: { item: WorkItem; 
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setConfirmClose(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
       <div className="w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl">
@@ -1289,6 +1303,22 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         </div>
         <div className="max-h-[78vh] overflow-y-auto p-5">{children}</div>
       </div>
+      {confirmClose ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/30 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+            <h4 className="text-base font-bold">창을 닫을까요?</h4>
+            <p className="mt-2 text-sm text-slate-600">작성 중인 내용은 저장되지 않을 수 있습니다.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setConfirmClose(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+                계속 작성
+              </button>
+              <button onClick={onClose} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
