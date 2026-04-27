@@ -34,6 +34,7 @@ export type WorkItem = {
   source?: "user_portal" | "admin_console";
   approvedByAcademyAdmin?: boolean;
   approvalNote?: string;
+  rejectionNote?: string;
   urgentReason?: string;
   urgentImpact?: string;
   evidenceFiles?: string[];

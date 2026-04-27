@@ -42,6 +42,7 @@ create table public.ops_requests (
   vendor text,
   audit_note text,
   approval_note text,
+  rejection_note text,
   urgent_reason text,
   urgent_impact text,
   evidence_files text[] not null default '{}',

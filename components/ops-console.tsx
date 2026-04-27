@@ -360,7 +360,7 @@ export function OpsConsole() {
 
     updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
   };
-  const reject = (item: WorkItem) => updateItem(item.id, { status: "보류", audit: "반려 또는 보완 요청" }, `${item.id} 보류 처리`);
+  const reject = (item: WorkItem) => updateItem(item.id, { status: "보류", audit: item.rejectionNote || "반려 또는 보완 요청", rejectionNote: item.rejectionNote || "보완 필요" }, `${item.id} 보류 처리`);
   const remove = (id: string) => {
     setItems((current) => current.filter((item) => item.id !== id));
     setSelectedId(items.find((item) => item.id !== id)?.id ?? "");
@@ -730,6 +730,7 @@ function QueueScreen(props: {
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<WorkItem | null>(null);
+  const [rejectionTarget, setRejectionTarget] = useState<WorkItem | null>(null);
 
   const openDetail = (id: string) => {
     props.setSelectedId(id);
@@ -753,7 +754,7 @@ function QueueScreen(props: {
       ) : null}
       {detailOpen && props.selectedItem ? (
         <Modal title="요청 상세" onClose={() => setDetailOpen(false)}>
-          <DetailPanel item={props.selectedItem} role={props.role} approve={() => setApprovalTarget(props.selectedItem!)} reject={() => props.reject(props.selectedItem!)} />
+          <DetailPanel item={props.selectedItem} role={props.role} approve={() => setApprovalTarget(props.selectedItem!)} reject={() => setRejectionTarget(props.selectedItem!)} />
         </Modal>
       ) : null}
       {approvalTarget ? (
@@ -764,6 +765,19 @@ function QueueScreen(props: {
             onSubmit={(note) => {
               props.approve({ ...approvalTarget, approvalNote: note });
               setApprovalTarget(null);
+            }}
+          />
+        </Modal>
+      ) : null}
+      {rejectionTarget ? (
+        <Modal title="보류 사유" onClose={() => setRejectionTarget(null)}>
+          <DecisionNoteForm
+            item={rejectionTarget}
+            mode="reject"
+            onCancel={() => setRejectionTarget(null)}
+            onSubmit={(note) => {
+              props.reject({ ...rejectionTarget, rejectionNote: note });
+              setRejectionTarget(null);
             }}
           />
         </Modal>
@@ -817,7 +831,7 @@ function QueueTable(props: {
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
                     <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
-                    <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.reject(item)} icon={X} tone="text-rose-700" />
+                    <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
                     <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
                   </div>
                 </td>
@@ -1124,6 +1138,9 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
       {item.approvalNote ? (
         <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">승인 의견: {item.approvalNote}</p>
       ) : null}
+      {item.rejectionNote ? (
+        <p className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">보류 사유: {item.rejectionNote}</p>
+      ) : null}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button disabled={!canApprove(role, item)} onClick={approve} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" aria-hidden="true" />승인</button>
         <button disabled={!canApprove(role, item)} onClick={reject} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"><X className="h-4 w-4" aria-hidden="true" />보류</button>
@@ -1149,7 +1166,8 @@ function printWorkItem(item: WorkItem) {
     ["기한", item.due],
     ["예산/수량", item.amount || "-"],
     ["업체", item.vendor || "-"],
-    ["승인 의견", item.approvalNote || "-"]
+    ["승인 의견", item.approvalNote || "-"],
+    ["보류 사유", item.rejectionNote || "-"]
   ];
 
   if (item.priority === "긴급") {
@@ -1222,6 +1240,37 @@ function ApprovalNoteForm({ item, onSubmit, onCancel }: { item: WorkItem; onSubm
         </button>
         <button onClick={() => onSubmit(note.trim() || "승인")} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
           승인
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function DecisionNoteForm({ item, mode, onSubmit, onCancel }: { item: WorkItem; mode: "reject"; onSubmit: (note: string) => void; onCancel: () => void }) {
+  const [note, setNote] = useState("");
+  const title = mode === "reject" ? "보류 사유" : "처리 의견";
+
+  return (
+    <section className="grid gap-4">
+      <div className="rounded-lg bg-slate-50 p-3">
+        <p className="text-sm font-bold">{item.title}</p>
+        <p className="mt-1 text-xs text-slate-500">{item.id} · {item.requester} · {item.priority}</p>
+      </div>
+      <textarea
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        className="min-h-28 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500"
+        placeholder="보류하는 이유와 필요한 보완 내용을 적어주세요. 예: 견적서 재첨부 필요, 긴급 증빙 부족"
+      />
+      <div className="rounded-lg bg-rose-50 p-3 text-xs text-rose-700">
+        보류 사유는 상세조회와 출력물에 함께 남습니다.
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+          취소
+        </button>
+        <button onClick={() => onSubmit(note.trim() || "보완 필요")} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">
+          {title} 저장
         </button>
       </div>
     </section>
