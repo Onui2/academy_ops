@@ -38,6 +38,9 @@ create table public.ops_requests (
   status public.request_status not null default 'received',
   priority public.request_priority not null default 'normal',
   budget_amount numeric(12, 2),
+  amount_text text,
+  vendor text,
+  audit_note text,
   due_date date,
   campus text,
   created_at timestamptz not null default now(),
@@ -136,6 +139,10 @@ alter table public.as_faqs enable row level security;
 create policy "profiles read own or admin"
 on public.profiles for select
 using (id = auth.uid() or public.is_ops_admin());
+
+create policy "profiles insert self"
+on public.profiles for insert
+with check (id = auth.uid());
 
 create policy "profiles update own basic fields"
 on public.profiles for update

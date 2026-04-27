@@ -20,10 +20,19 @@ import {
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { aiHarnessSteps, modules, nasMetrics, workItems as seedItems } from "@/lib/ops-data";
+import { createClient } from "@/lib/supabase";
+import {
+  createRequest as createDbRequest,
+  deleteRequest as deleteDbRequest,
+  ensureProfile,
+  fetchRequests,
+  updateRequestStatus
+} from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
 import type { UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { User } from "@supabase/supabase-js";
 
 type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "subly" | "nas" | "audit";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
@@ -95,6 +104,13 @@ function makeId(items: WorkItem[]) {
 }
 
 export function OpsConsole() {
+  const [supabase] = useState(() => createClient());
+  const [user, setUser] = useState<User | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [syncState, setSyncState] = useState("데모 모드");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("academy_admin");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
@@ -109,6 +125,7 @@ export function OpsConsole() {
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
 
   useEffect(() => {
+    if (supabase) return;
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return;
     try {
@@ -118,11 +135,58 @@ export function OpsConsole() {
     } catch {
       window.localStorage.removeItem(storageKey);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
+    if (supabase) return;
     window.localStorage.setItem(storageKey, JSON.stringify({ items, audit }));
-  }, [items, audit]);
+  }, [items, audit, supabase]);
+
+  const loadDbRequests = useCallback(async (nextUser = user) => {
+    if (!supabase || !nextUser) return;
+    try {
+      setSyncState("DB 동기화 중");
+      await ensureProfile(supabase, nextUser);
+      const rows = await fetchRequests(supabase);
+      setItems(rows.length ? rows : seedItems);
+      setSelectedId(rows[0]?.id ?? seedItems[0]?.id ?? "");
+      setSyncState("Supabase 연결됨");
+    } catch (error) {
+      setSyncState(error instanceof Error ? error.message : "DB 동기화 실패");
+    }
+  }, [supabase, user]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let alive = true;
+
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!alive) return;
+      setUser(data.user);
+      if (data.user) {
+        await loadDbRequests(data.user);
+      } else {
+        setSyncState("로그인 필요");
+      }
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+      if (nextUser) {
+        void loadDbRequests(nextUser);
+      } else {
+        setItems(seedItems);
+        setSyncState("로그인 필요");
+      }
+    });
+
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase, loadDbRequests]);
 
   const selectedItem = items.find((item) => item.id === selectedId) ?? items[0];
   const filteredItems = useMemo(() => {
@@ -143,18 +207,34 @@ export function OpsConsole() {
     setAudit((current) => [{ id: `AUD-${Date.now()}`, at, actor, event }, ...current]);
   };
 
-  const addRequest = (request: Omit<WorkItem, "id">) => {
+  const addRequest = async (request: Omit<WorkItem, "id">) => {
     const id = makeId(items);
     const next = { id, ...request };
-    setItems((current) => [next, ...current]);
-    setSelectedId(id);
-    setActiveMenu("queue");
-    addAudit("Router AI", `${id} ${request.module} 요청 접수`);
+    try {
+      if (supabase && user) {
+        await createDbRequest(supabase, user, next);
+        await loadDbRequests(user);
+      } else {
+        setItems((current) => [next, ...current]);
+      }
+      setSelectedId(id);
+      setActiveMenu("queue");
+      addAudit("Router AI", `${id} ${request.module} 요청 접수`);
+    } catch (error) {
+      setSyncState(error instanceof Error ? error.message : "요청 생성 실패");
+    }
   };
 
   const updateItem = (id: string, patch: Partial<WorkItem>, event: string) => {
+    const nextItem = items.find((item) => item.id === id);
+    const patched = nextItem ? { ...nextItem, ...patch } : null;
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
     addAudit(roles.find((item) => item.value === role)?.label ?? "사용자", event);
+    if (supabase && patched) {
+      updateRequestStatus(supabase, patched).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "상태 저장 실패");
+      });
+    }
   };
 
   const approve = (item: WorkItem) => updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1 }, `${item.id} 승인 진행`);
@@ -163,6 +243,11 @@ export function OpsConsole() {
     setItems((current) => current.filter((item) => item.id !== id));
     setSelectedId(items.find((item) => item.id !== id)?.id ?? "");
     addAudit("관리자", `${id} 삭제`);
+    if (supabase) {
+      deleteDbRequest(supabase, id).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "삭제 실패");
+      });
+    }
   };
 
   const createManualRequest = () => {
@@ -241,10 +326,41 @@ export function OpsConsole() {
   });
 
   const resetLocal = () => {
+    if (supabase) {
+      void loadDbRequests();
+      return;
+    }
     setItems(seedItems);
     setAudit(initialAudit);
     setSelectedId(seedItems[0]?.id ?? "");
     window.localStorage.removeItem(storageKey);
+  };
+
+  const submitAuth = async () => {
+    if (!supabase) return;
+    try {
+      setSyncState("인증 중");
+      const result =
+        authMode === "signin"
+          ? await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+          : await supabase.auth.signUp({
+              email: authEmail,
+              password: authPassword,
+              options: { data: { full_name: authName || authEmail.split("@")[0] } }
+            });
+      if (result.error) throw result.error;
+      if (result.data.user) await ensureProfile(supabase, result.data.user);
+      setSyncState(authMode === "signin" ? "로그인됨" : "회원가입 완료");
+    } catch (error) {
+      setSyncState(error instanceof Error ? error.message : "인증 실패");
+    }
+  };
+
+  const signOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setUser(null);
+    setSyncState("로그아웃됨");
   };
 
   return (
@@ -262,7 +378,8 @@ export function OpsConsole() {
           <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="focus-ring h-10 rounded-lg border border-slate-200 bg-white/85 px-3 text-sm font-semibold shadow-sm" aria-label="역할 선택">
             {roles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <button className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white shadow-sm" aria-label="로그아웃">
+          <span className="hidden rounded-lg bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600 lg:inline-flex">{syncState}</span>
+          <button onClick={signOut} className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white shadow-sm" aria-label="로그아웃">
             <LogOut className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
@@ -289,16 +406,68 @@ export function OpsConsole() {
         </nav>
 
         <div className="min-w-0">
-          {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
-          {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-          {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} /> : null}
-          {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
-          {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
-          {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} /> : null}
-          {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
+          {supabase && !user ? (
+            <AuthPanel
+              email={authEmail}
+              password={authPassword}
+              name={authName}
+              mode={authMode}
+              message={syncState}
+              setEmail={setAuthEmail}
+              setPassword={setAuthPassword}
+              setName={setAuthName}
+              setMode={setAuthMode}
+              submit={submitAuth}
+            />
+          ) : (
+            <>
+              {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
+              {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} /> : null}
+              {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
+              {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
+              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} /> : null}
+              {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
+            </>
+          )}
         </div>
       </div>
     </main>
+  );
+}
+
+function AuthPanel(props: {
+  email: string;
+  password: string;
+  name: string;
+  mode: "signin" | "signup";
+  message: string;
+  setEmail: (value: string) => void;
+  setPassword: (value: string) => void;
+  setName: (value: string) => void;
+  setMode: (value: "signin" | "signup") => void;
+  submit: () => void;
+}) {
+  return (
+    <section className="surface-strong mx-auto max-w-md rounded-xl p-5">
+      <div>
+        <h2 className="text-2xl font-bold">로그인</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Supabase Auth 연결됨. 로그인하면 요청 큐가 DB와 동기화됩니다.</p>
+      </div>
+      <div className="mt-5 grid gap-3">
+        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+          <button onClick={() => props.setMode("signin")} className={`h-9 rounded-md text-sm font-semibold ${props.mode === "signin" ? "bg-white shadow-sm" : "text-slate-500"}`}>로그인</button>
+          <button onClick={() => props.setMode("signup")} className={`h-9 rounded-md text-sm font-semibold ${props.mode === "signup" ? "bg-white shadow-sm" : "text-slate-500"}`}>가입</button>
+        </div>
+        {props.mode === "signup" ? <input value={props.name} onChange={(event) => props.setName(event.target.value)} className="field" placeholder="이름" /> : null}
+        <input value={props.email} onChange={(event) => props.setEmail(event.target.value)} className="field" placeholder="email@academy.local" type="email" />
+        <input value={props.password} onChange={(event) => props.setPassword(event.target.value)} className="field" placeholder="비밀번호" type="password" />
+        <button onClick={props.submit} className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 text-sm font-semibold text-white">
+          {props.mode === "signin" ? "로그인" : "계정 생성"}
+        </button>
+        <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">{props.message}</p>
+      </div>
+    </section>
   );
 }
 
