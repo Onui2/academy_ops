@@ -119,3 +119,41 @@ export const aiHarnessSteps = [
   { label: "Reviewer", icon: FileCheck2, text: "버그, 성능, 보안, 유지보수성 검토" },
   { label: "Auditor", icon: ShieldCheck, text: "권한 누락, 감사 로그, 데이터 정합성 검증" }
 ];
+
+export const equipmentParts: EquipmentPart[] = [
+  // CPU
+  { id: "cpu-1", category: "CPU", name: "Intel Core i3 (13th Gen)", price: 150000, description: "기본 사무용", performanceNote: "간단한 문서 작업과 웹서핑에 적합합니다.", tier: "기본" },
+  { id: "cpu-2", category: "CPU", name: "Intel Core i5 (13th Gen)", price: 280000, description: "표준 업무용", performanceNote: "멀티태스킹과 엑셀 작업이 원활합니다.", tier: "업무용" },
+  { id: "cpu-3", category: "CPU", name: "Intel Core i7 (14th Gen)", price: 480000, description: "고성능 전문가용", performanceNote: "무거운 디자인, 영상 편집 프로그램도 거뜬합니다.", tier: "고성능" },
+  
+  // RAM
+  { id: "ram-1", category: "RAM", name: "8GB DDR5", price: 45000, description: "최소 사양", performanceNote: "기본적인 업무 수행이 가능합니다.", tier: "기본" },
+  { id: "ram-2", category: "RAM", name: "16GB DDR5", price: 85000, description: "표준 사양", performanceNote: "인터넷 창을 여러 개 띄워도 쾌적합니다.", tier: "업무용" },
+  { id: "ram-3", category: "RAM", name: "32GB DDR5", price: 160000, description: "전문가용", performanceNote: "대용량 데이터와 그래픽 작업을 동시에 수행합니다.", tier: "고성능" },
+
+  // SSD
+  { id: "ssd-1", category: "SSD", name: "256GB NVMe", price: 50000, description: "저용량", performanceNote: "시스템 부팅과 기본 프로그램 운용에 적합합니다.", tier: "기본" },
+  { id: "ssd-2", category: "SSD", name: "512GB NVMe", price: 85000, description: "표준 용량", performanceNote: "업무용 문서와 자료를 충분히 저장할 수 있습니다.", tier: "업무용" },
+  { id: "ssd-3", category: "SSD", name: "1TB NVMe", price: 150000, description: "대용량", performanceNote: "영상과 사진등 대용량 파일을 넉넉하게 보관합니다.", tier: "고성능" },
+
+  // Mainboard
+  { id: "mb-1", category: "Mainboard", name: "B760M 보급형", price: 120000, description: "표준 안정성", performanceNote: "안정적인 시스템 구동을 지원합니다.", tier: "업무용" },
+  { id: "mb-2", category: "Mainboard", name: "Z790 고급형", price: 350000, description: "고성능 안정성", performanceNote: "고전력 부품들과 완벽한 호환성을 보장합니다.", tier: "고성능" },
+
+  // Power
+  { id: "pwr-1", category: "Power", name: "500W 정격", price: 45000, description: "표준 전력", performanceNote: "일반 사무용 PC에 충분한 전력을 공급합니다.", tier: "업무용" },
+  { id: "pwr-2", category: "Power", name: "750W 80PLUS Gold", price: 120000, description: "고효율 전력", performanceNote: "고성능 그래픽카드 장착 시 안정적인 전력을 공급합니다.", tier: "고성능" },
+
+  // Graphic Card
+  { id: "gpu-1", category: "Graphic Card", name: "내장 그래픽 (UHD 770)", price: 0, description: "사무용", performanceNote: "일반적인 영상 시청과 문서 작업에 충분합니다.", tier: "기본" },
+  { id: "gpu-2", category: "Graphic Card", name: "NVIDIA RTX 4060", price: 420000, description: "메인스트림", performanceNote: "배너 디자인, 영상 컷 편집이 수월해집니다.", tier: "업무용" },
+  { id: "gpu-3", category: "Graphic Card", name: "NVIDIA RTX 4080", price: 1600000, description: "고성능 작업용", performanceNote: "3D 랜더링, 4K 영상 편집을 순식간에 끝냅니다.", tier: "고성능" },
+
+  // Case
+  { id: "case-1", category: "Case", name: "미니 타워 (심플)", price: 35000, description: "공간 절약", performanceNote: "데스크 위 공간 활용도가 높습니다.", tier: "업무용" },
+  { id: "case-2", category: "Case", name: "미들 타워 (통풍형)", price: 65000, description: "우수한 쿨링", performanceNote: "내부 열 배출이 원활하여 장시간 사용 시 유리합니다.", tier: "고성능" },
+
+  // Monitor
+  { id: "mon-1", category: "Monitor", name: "24인치 FHD 75Hz", price: 140000, description: "표준 사무용", performanceNote: "가장 보편적인 업무용 사이즈입니다.", tier: "기본" },
+  { id: "mon-2", category: "Monitor", name: "27인치 QHD 144Hz", price: 320000, description: "고해상도", performanceNote: "화면이 넓어 엑셀이나 문서를 두 개 띄우기 좋습니다.", tier: "업무용" }
+];

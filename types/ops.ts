@@ -54,3 +54,18 @@ export type NasMetric = {
   detail: string;
   health: "정상" | "주의" | "위험";
 };
+
+export type EquipmentPart = {
+  id: string;
+  category: "CPU" | "RAM" | "SSD" | "GPU" | "Display" | "Other";
+  name: string;
+  price: number;
+  description: string;
+  performanceNote: string;
+  tier: "기본" | "업무용" | "고성능";
+};
+
+export type EquipmentConfig = {
+  parts: Record<string, string>; // category -> partId
+  totalPrice: number;
+};

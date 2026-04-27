@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertTriangle,
+  Bot,
   CalendarDays,
   Check,
   ClipboardList,
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { aiHarnessSteps, modules, nasMetrics, workItems as seedItems } from "@/lib/ops-data";
+import { aiHarnessSteps, equipmentParts, modules, nasMetrics, workItems as seedItems } from "@/lib/ops-data";
 import { createClient } from "@/lib/supabase";
 import {
   createRequest as createDbRequest,
@@ -36,7 +37,7 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
-import type { UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { EquipmentConfig, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
 type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "subly" | "nas" | "audit";
@@ -211,6 +212,35 @@ export function OpsConsole() {
     username: "",
     password: ""
   });
+  const [config, setConfig] = useState<EquipmentConfig>({
+    parts: { 
+      CPU: "cpu-2", 
+      RAM: "ram-2", 
+      SSD: "ssd-2", 
+      "Graphic Card": "gpu-1",
+      Mainboard: "mb-1",
+      Power: "pwr-1",
+      Case: "case-1",
+      Monitor: "mon-1"
+    },
+    totalPrice: 0
+  });
+
+  const calculateTotal = useCallback((nextParts: Record<string, string>) => {
+    return Object.values(nextParts).reduce((sum, partId) => {
+      const part = equipmentParts.find((p) => p.id === partId);
+      return sum + (part?.price ?? 0);
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    setConfig((prev) => ({ ...prev, totalPrice: calculateTotal(prev.parts) }));
+  }, [calculateTotal]);
+
+  const updateConfig = (category: string, partId: string) => {
+    const nextParts = { ...config.parts, [category]: partId };
+    setConfig({ parts: nextParts, totalPrice: calculateTotal(nextParts) });
+  };
 
   useEffect(() => {
     if (supabase) return;
@@ -416,8 +446,21 @@ export function OpsConsole() {
   };
 
   const createEquipment = () => {
-    const total = equipment.count * equipment.unitPrice;
+    const isCustom = equipment.item === "노트북" || equipment.item === "데스크톱";
+    const basePrice = isCustom ? config.totalPrice : equipment.unitPrice;
+    const total = equipment.count * basePrice;
     const needsAccountingConfirm = total > 500000;
+
+    const configLines = isCustom
+      ? [
+          "--- 커스텀 사양 ---",
+          ...Object.entries(config.parts).map(([cat, id]) => {
+            const part = equipmentParts.find((p) => p.id === id);
+            return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
+          })
+        ]
+      : [];
+
     addRequest({
       module: "전산 장비",
       title: `${equipment.campus} ${equipment.item} ${equipment.count}대 구매`,
@@ -433,7 +476,9 @@ export function OpsConsole() {
         needsAccountingConfirm ? "안내: 50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "",
         `처리 분류: ${equipment.processType}`,
         `품목: ${equipment.item}`,
+        ...configLines,
         `수량: ${equipment.count}`,
+        `대당 단가: ${basePrice.toLocaleString()}원`,
         `장비 사용자: ${equipment.userName || "미입력"}`,
         `사용 목적: ${equipment.purpose || "미입력"}`,
         `직무: ${equipment.roles.length ? equipment.roles.join(", ") : "미선택"}`,
@@ -645,7 +690,7 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} updateConfig={updateConfig} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
               {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} webdav={webdav} webdavLoading={webdavLoading} checkWebDav={checkWebDav} webdavTargets={webdavTargets} webdavDraft={webdavDraft} setWebdavDraft={setWebdavDraft} addWebDavTarget={addWebDavTarget} removeWebDavTarget={removeWebDavTarget} /> : null}
@@ -880,92 +925,164 @@ function QueueTable(props: {
   );
 }
 
-function EquipmentScreen({ equipment, setEquipment, createEquipment }: { equipment: EquipmentForm; setEquipment: (value: EquipmentForm) => void; createEquipment: () => void }) {
-  const total = equipment.count * equipment.unitPrice;
+function EquipmentScreen({
+  equipment,
+  setEquipment,
+  createEquipment,
+  config,
+  updateConfig
+}: {
+  equipment: EquipmentForm;
+  setEquipment: (value: EquipmentForm) => void;
+  createEquipment: () => void;
+  config: EquipmentConfig;
+  updateConfig: (category: string, partId: string) => void;
+}) {
+  const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
+  const basePrice = isCustomizable ? config.totalPrice : equipment.unitPrice;
+  const total = equipment.count * basePrice;
+
   const toggleRole = (role: string) => {
     const exists = equipment.roles.includes(role);
     setEquipment({ ...equipment, roles: exists ? equipment.roles.filter((item) => item !== role) : [...equipment.roles, role] });
   };
 
   return (
-    <Screen title="장비 구매" desc="필요 일자, 사용 목적, 대상 직무까지 입력해 승인자가 바로 판단할 수 있게 구성합니다.">
-      <section className="surface-strong max-w-3xl overflow-hidden rounded-2xl">
-        <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <PackageCheck className="h-5 w-5" aria-hidden="true" />
+    <Screen title="장비 구매" desc="컴퓨터 장비는 필요한 성능 사양(CPU/RAM/SSD)을 직접 선택하여 최적화된 견적을 산출할 수 있습니다.">
+      <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <section className="surface-strong overflow-hidden rounded-2xl">
+          <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+              <PackageCheck className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h3 className="font-bold">장비 사양 및 요청서</h3>
+              <p className="text-sm text-slate-500">부품별 성능 설명을 확인하고 업무 유형에 맞는 구성을 선택하세요.</p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold">구매 요청서</h3>
-            <p className="text-sm text-slate-500">필수 정보가 많을수록 승인과 구매가 빨라집니다.</p>
+
+          <div className="divide-y divide-slate-200">
+            <EquipmentRow label="캠퍼스">
+              <input value={equipment.campus} onChange={(event) => setEquipment({ ...equipment, campus: event.target.value })} className="field w-full" placeholder="강남캠퍼스" />
+            </EquipmentRow>
+            <EquipmentRow label="품목">
+              <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
+                <option>노트북</option>
+                <option>데스크톱</option>
+                <option>모니터</option>
+                <option>태블릿</option>
+                <option>프린터</option>
+                <option>공유기/네트워크 장비</option>
+                <option>기타 장비</option>
+              </select>
+            </EquipmentRow>
+
+            {isCustomizable ? (
+              <div className="bg-blue-50/30 p-5">
+                <h4 className="mb-4 text-sm font-bold text-blue-900">커스텀 사양 빌더</h4>
+                <div className="grid gap-6">
+                  {Object.keys(config.parts).map((category) => (
+                    <div key={category} className="grid gap-2 sm:grid-cols-[120px_1fr]">
+                      <span className="text-sm font-bold text-slate-600">{category}</span>
+                      <div className="grid gap-2">
+                        <select
+                          value={config.parts[category] || ""}
+                          onChange={(e) => updateConfig(category, e.target.value)}
+                          className="field w-full border-blue-200"
+                        >
+                          {equipmentParts
+                            .filter((p) => p.category === category)
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.tier === "고성능" ? "🚀 " : p.tier === "업무용" ? "💼 " : ""}
+                                {p.name} (+{p.price.toLocaleString()}원)
+                              </option>
+                            ))}
+                        </select>
+                        {config.parts[category] && (
+                          <p className="rounded-lg bg-white px-3 py-2 text-xs leading-relaxed text-blue-800 shadow-sm">
+                            <span className="font-bold">💡 활용 가이드:</span> {equipmentParts.find((p) => p.id === config.parts[category])?.performanceNote}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <EquipmentRow label="단가">
+                <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full" placeholder="예상 단가" />
+              </EquipmentRow>
+            )}
+
+            <EquipmentRow label="수량">
+              <input type="number" min={1} value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field w-full" placeholder="수량" />
+            </EquipmentRow>
+
+            <EquipmentRow label="장비 사용자">
+              <div className="grid gap-3 md:grid-cols-2">
+                <input value={equipment.userName} onChange={(event) => setEquipment({ ...equipment, userName: event.target.value })} className="field w-full" placeholder="사용자명 또는 부서" />
+                <input value={equipment.purpose} onChange={(event) => setEquipment({ ...equipment, purpose: event.target.value })} className="field w-full" placeholder="사용 목적" />
+              </div>
+            </EquipmentRow>
+
+            <EquipmentRow label="기타 전달 사항">
+              <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
+            </EquipmentRow>
           </div>
-        </div>
 
-        <div className="divide-y divide-slate-200">
-          <EquipmentRow label="캠퍼스">
-            <input value={equipment.campus} onChange={(event) => setEquipment({ ...equipment, campus: event.target.value })} className="field w-full" placeholder="강남캠퍼스" />
-          </EquipmentRow>
-          <EquipmentRow label="필요 일자">
-            <div className="relative max-w-48">
-              <input type="date" value={equipment.neededDate} onChange={(event) => setEquipment({ ...equipment, neededDate: event.target.value })} className="field w-full pr-10" />
-              <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
+          <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <p className="text-xs text-slate-500">대당 단가: {basePrice.toLocaleString()}원</p>
+              <p className={`mt-1 rounded-xl px-3 py-2 text-sm font-bold ${total > 500000 ? "bg-amber-100 text-amber-900" : "bg-blue-100 text-blue-900"}`}>
+                총 견적 {total.toLocaleString("ko-KR")}원
+              </p>
             </div>
-          </EquipmentRow>
-          <EquipmentRow label="처리 분류">
-            <select value={equipment.processType} onChange={(event) => setEquipment({ ...equipment, processType: event.target.value })} className="field w-full">
-              <option>신규 구매</option>
-              <option>교체 구매</option>
-              <option>추가 지급</option>
-              <option>고장 대체</option>
-              <option>예비 장비</option>
-            </select>
-          </EquipmentRow>
-          <EquipmentRow label="품목">
-            <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
-              <option>노트북</option>
-              <option>데스크톱</option>
-              <option>모니터</option>
-              <option>태블릿</option>
-              <option>프린터</option>
-              <option>공유기/네트워크 장비</option>
-              <option>기타 장비</option>
-            </select>
-          </EquipmentRow>
-          <EquipmentRow label="수량">
-            <input type="number" min={1} value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field w-full" placeholder="수량" />
-          </EquipmentRow>
-          <EquipmentRow label="단가">
-            <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full" placeholder="예상 단가" />
-          </EquipmentRow>
-          <EquipmentRow label="장비 사용자">
-            <div className="grid gap-3 md:grid-cols-2">
-              <input value={equipment.userName} onChange={(event) => setEquipment({ ...equipment, userName: event.target.value })} className="field w-full" placeholder="사용자명 또는 부서" />
-              <input value={equipment.purpose} onChange={(event) => setEquipment({ ...equipment, purpose: event.target.value })} className="field w-full" placeholder="사용 목적" />
-            </div>
-          </EquipmentRow>
-          <EquipmentRow label="직무">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {["관리자", "데스크", "선생님", "조교", "기타"].map((role) => (
-                <label key={role} className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                  <input type="checkbox" checked={equipment.roles.includes(role)} onChange={() => toggleRole(role)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
-                  {role}
-                </label>
-              ))}
-            </div>
-          </EquipmentRow>
-          <EquipmentRow label="전달 사항">
-            <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="설치 위치, 선호 사양, 기존 장비 반납 여부 등을 적어주세요." />
-          </EquipmentRow>
-        </div>
+            <button
+              onClick={() => {
+                // If customizable, we should update the original equipment unitPrice before sending
+                if (isCustomizable) {
+                  setEquipment({ ...equipment, unitPrice: basePrice });
+                }
+                createEquipment();
+              }}
+              className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white hover:bg-blue-700"
+            >
+              <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+              구매 요청 생성
+            </button>
+          </div>
+        </section>
 
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
-          <p className={`rounded-xl p-3 text-sm font-semibold ${total > 500000 ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"}`}>
-            총액 {total.toLocaleString("ko-KR")}원 · {total > 500000 ? "50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "관리자 검토"}
-          </p>
-          <button onClick={createEquipment} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white hover:bg-blue-700">
-            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-            구매 요청 생성
-          </button>
-        </div>
+        <aside className="space-y-5">
+          <div className="surface-strong rounded-2xl p-5">
+            <h4 className="flex items-center gap-2 font-bold text-slate-800">
+              <ShieldCheck className="h-4 w-4 text-blue-600" />
+              승인 가이드라인
+            </h4>
+            <div className="mt-4 space-y-3 text-xs leading-5 text-slate-600">
+              <p>• <strong>50만원 이하:</strong> 학원 관리자 승인 후 즉시 구매 가능</p>
+              <p>• <strong>50만원 초과:</strong> 최고 관리자(회계팀) 추가 승인이 필요하며 평균 2~3일 소요됩니다.</p>
+              <p>• <strong>고성능 필수 직무:</strong> 영상 편집, 디자인, 서버 관리 등 명확한 이유 기재 시 승인이 원활합니다.</p>
+            </div>
+          </div>
+
+          <div className="surface-strong rounded-2xl p-5">
+            <h4 className="flex items-center gap-2 font-bold text-slate-800">
+              <Bot className="h-4 w-4 text-blue-600" />
+              AI 사양 추천
+            </h4>
+            <div className="mt-4 rounded-xl bg-blue-50 p-4 text-xs text-blue-900">
+              {config.totalPrice > 1000000 ? (
+                <p>현재 구성은 <strong>[고성능 워크스테이션]</strong> 등급입니다. 전문적인 작업(디자인, 개발)이 필요한 직무에 권장합니다.</p>
+              ) : config.totalPrice > 600000 ? (
+                <p>현재 구성은 <strong>[표준 비즈니스]</strong> 등급입니다. 일반적인 학원 행정 및 엑셀 작업에 최적화되어 있습니다.</p>
+              ) : (
+                <p>현재 구성은 <strong>[엔트리/단순 업무]</strong> 등급입니다. 웹서핑, 간단한 문서 조회용으로 적합합니다.</p>
+              )}
+            </div>
+          </div>
+        </aside>
       </section>
     </Screen>
   );
