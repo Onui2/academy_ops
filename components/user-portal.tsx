@@ -16,7 +16,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { createRequest, ensureProfile, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
 import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
 import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
 
@@ -92,17 +92,21 @@ export function UserPortal() {
   const loadHistory = useCallback(async () => {
     if (supabase) {
       try {
-        const rows = await fetchRequests(supabase);
-        setSubmitted(rows);
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.user) {
+          const rows = await fetchRequests(supabase);
+          setSubmitted(rows);
+          return;
+        }
       } catch (err) {
         console.error("Failed to load history from DB", err);
       }
-    } else {
-      const raw = window.localStorage.getItem(adminStorageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { items?: WorkItem[] };
-        setSubmitted(parsed.items ?? []);
-      }
+    }
+
+    const raw = window.localStorage.getItem(adminStorageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { items?: WorkItem[] };
+      setSubmitted(parsed.items ?? []);
     }
   }, [supabase]);
 
@@ -122,7 +126,7 @@ export function UserPortal() {
     setDraft({
       category: categoryMap[item.module] ?? "other",
       title: item.title,
-      campus: item.requester,
+      academy: item.requester,
       detail: item.description ?? "",
       urgency: item.priority === "긴급" ? "긴급" : item.priority === "높음" ? "빠름" : "보통",
       urgentReason: item.urgentReason ?? "",
@@ -213,7 +217,20 @@ export function UserPortal() {
         };
 
         if (supabase) {
-          await updateRequestStatus(supabase, updated);
+          const { data } = await supabase.auth.getSession();
+          const currentUser = data.session?.user;
+
+          if (currentUser) {
+            try {
+              await ensureProfile(supabase, currentUser);
+              await updateRequestStatus(supabase, updated);
+            } catch (error) {
+              console.error("Failed to update request in Supabase", error);
+              updateInAdminQueue(updated);
+            }
+          } else {
+            updateInAdminQueue(updated);
+          }
         } else {
           updateInAdminQueue(updated);
         }
@@ -237,10 +254,24 @@ export function UserPortal() {
         evidenceFiles: files.map((file) => file.name)
       };
 
-      if (!supabase) {
+      if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        const currentUser = data.session?.user;
+
+        if (currentUser) {
+          try {
+            await ensureProfile(supabase, currentUser);
+            await createRequest(supabase, currentUser, item);
+          } catch (error) {
+            console.error("Failed to create request in Supabase", error);
+            pushToAdminQueue(item);
+          }
+        } else {
+          pushToAdminQueue(item);
+        }
+      } else {
         pushToAdminQueue(item);
       }
-      // TODO: Handle Supabase create for UserPortal if needed
     }
 
     await loadHistory();
