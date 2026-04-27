@@ -481,8 +481,8 @@ export function OpsConsole() {
 
     addRequest({
       module: "전산 장비",
-      title: `${equipment.campus} ${equipment.item} ${equipment.count}대 구매`,
-      requester: equipment.campus,
+      title: `${equipment.academy} ${equipment.item} ${equipment.count}대 구매`,
+      requester: equipment.academy,
       owner: "경영지원",
       status: needsAccountingConfirm ? "승인 대기" : "검토",
       priority: needsAccountingConfirm ? "높음" : "보통",
@@ -824,7 +824,20 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
               </div>
               <h3 className="mt-4 text-sm font-bold">{module.name}</h3>
               <p className="mt-1 min-h-10 text-sm text-muted-foreground">{module.description}</p>
-              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50">
+              <button
+                onClick={() =>
+                  props.setActiveMenu(
+                    module.name.includes("장비")
+                      ? "equipment"
+                      : module.name.includes("A/S")
+                        ? "as"
+                        : module.name.includes("NAS")
+                          ? "nas"
+                          : "queue"
+                  )
+                }
+                className="focus-ring mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50"
+              >
                 열기
               </button>
             </article>
