@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Academy Ops Hub",
+  title: {
+    default: "Academy Ops Hub",
+    template: "%s | Academy Ops Hub"
+  },
   description: "Academy operations workflow dashboard"
 };
 
