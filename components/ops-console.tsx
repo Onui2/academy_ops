@@ -765,6 +765,7 @@ function QueueScreen(props: {
             onSubmit={(note) => {
               props.approve({ ...approvalTarget, approvalNote: note });
               setApprovalTarget(null);
+              setDetailOpen(false);
             }}
           />
         </Modal>
@@ -778,6 +779,7 @@ function QueueScreen(props: {
             onSubmit={(note) => {
               props.reject({ ...rejectionTarget, rejectionNote: note });
               setRejectionTarget(null);
+              setDetailOpen(false);
             }}
           />
         </Modal>
