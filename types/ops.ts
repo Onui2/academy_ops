@@ -31,6 +31,8 @@ export type WorkItem = {
   amount?: string;
   vendor?: string;
   approvalStep?: number;
+  source?: "user_portal" | "admin_console";
+  approvedByAcademyAdmin?: boolean;
 };
 
 export type ModuleSummary = {

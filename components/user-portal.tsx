@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import type { WorkItem } from "@/types/ops";
 
 type Category = "equipment" | "as" | "subly" | "nas" | "other";
 
@@ -71,6 +72,8 @@ const samples = [
   "겨울 방학 안내문 500부 인쇄 요청"
 ];
 
+const adminStorageKey = "academy-ops-hub-state-v2";
+
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
     category: "equipment",
@@ -93,6 +96,22 @@ export function UserPortal() {
 
   const submit = () => {
     if (!draft.title.trim()) return;
+    const item: WorkItem = {
+      id: makeRequestId(),
+      module: categoryToModule(draft.category),
+      title: draft.title,
+      requester: draft.campus,
+      owner: "학원 관리자",
+      status: "접수",
+      priority: draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통",
+      due: draft.urgency === "긴급" ? "오늘" : "신규",
+      audit: "사용자 포털 접수 - 학원 관리자 승인 대기",
+      description: draft.detail,
+      approvalStep: 0,
+      source: "user_portal",
+      approvedByAcademyAdmin: false
+    };
+    pushToAdminQueue(item);
     setSubmitted((current) => [{ ...draft }, ...current]);
     setDraft({ ...draft, title: "", detail: "" });
   };
@@ -234,5 +253,41 @@ export function UserPortal() {
         </aside>
       </div>
     </main>
+  );
+}
+
+function categoryToModule(category: Category) {
+  if (category === "equipment") return "전산 장비";
+  if (category === "as") return "A/S";
+  if (category === "subly") return "서블리";
+  if (category === "nas") return "NAS";
+  return "기타";
+}
+
+function makeRequestId() {
+  return `AOH-${Date.now().toString().slice(-6)}`;
+}
+
+function pushToAdminQueue(item: WorkItem) {
+  const raw = window.localStorage.getItem(adminStorageKey);
+  const parsed = raw ? JSON.parse(raw) as { items?: WorkItem[]; audit?: Array<{ id: string; at: string; actor: string; event: string }> } : {};
+  const items = parsed.items ?? [];
+  const audit = parsed.audit ?? [];
+  const at = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+
+  window.localStorage.setItem(
+    adminStorageKey,
+    JSON.stringify({
+      items: [item, ...items],
+      audit: [
+        {
+          id: `AUD-${Date.now()}`,
+          at,
+          actor: "사용자 포털",
+          event: `${item.id} ${item.title} 접수`
+        },
+        ...audit
+      ]
+    })
   );
 }

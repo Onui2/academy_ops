@@ -56,16 +56,22 @@ export async function ensureProfile(supabase: SupabaseClient, user: User) {
   const email = user.email ?? "unknown@academy.local";
   const fullName = user.user_metadata?.full_name ?? email.split("@")[0];
 
-  const { error } = await supabase.from("profiles").upsert(
-    {
-      id: user.id,
-      email,
-      full_name: fullName,
-      role: "academy_admin",
-      mfa_enabled: false
-    },
-    { onConflict: "id" }
-  );
+  const { data: existing, error: readError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (readError) throw readError;
+  if (existing) return;
+
+  const { error } = await supabase.from("profiles").insert({
+    id: user.id,
+    email,
+    full_name: fullName,
+    role: "general",
+    mfa_enabled: false
+  });
 
   if (error) throw error;
 }

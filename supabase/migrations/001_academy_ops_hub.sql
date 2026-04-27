@@ -144,10 +144,10 @@ create policy "profiles insert self"
 on public.profiles for insert
 with check (id = auth.uid());
 
-create policy "profiles update own basic fields"
+create policy "profiles update admin only"
 on public.profiles for update
-using (id = auth.uid())
-with check (id = auth.uid());
+using (public.current_role() = 'super_admin')
+with check (public.current_role() = 'super_admin');
 
 create policy "requests read own or admin"
 on public.ops_requests for select

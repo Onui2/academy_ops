@@ -80,7 +80,7 @@ const defaultForm: RequestForm = {
 function canApprove(role: UserRole, item: WorkItem) {
   if (role === "super_admin") return item.status !== "완료";
   if (role === "executive") return item.status === "승인 대기";
-  if (role === "academy_admin") return item.status === "접수" || item.status === "검토";
+  if (role === "academy_admin") return item.status === "접수" && item.owner === "학원 관리자";
   if (role === "nas_admin") return item.module === "NAS";
   return false;
 }
@@ -237,7 +237,38 @@ export function OpsConsole() {
     }
   };
 
-  const approve = (item: WorkItem) => updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1 }, `${item.id} 승인 진행`);
+  const approve = (item: WorkItem) => {
+    if (role === "academy_admin" && item.status === "접수") {
+      updateItem(
+        item.id,
+        {
+          status: "승인 대기",
+          owner: "최고 관리자",
+          audit: "학원 관리자 승인 완료 - 최고 관리자 승인 대기",
+          approvalStep: 1,
+          approvedByAcademyAdmin: true
+        },
+        `${item.id} 학원 관리자 승인`
+      );
+      return;
+    }
+
+    if (role === "super_admin" && item.status === "승인 대기") {
+      updateItem(
+        item.id,
+        {
+          status: "진행",
+          owner: item.module === "NAS" ? "NAS 관리자" : item.module === "A/S" ? "전산" : "경영지원",
+          audit: "최고 관리자 승인 완료 - 담당 부서 진행",
+          approvalStep: (item.approvalStep ?? 1) + 1
+        },
+        `${item.id} 최고 관리자 승인`
+      );
+      return;
+    }
+
+    updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1 }, `${item.id} 승인 진행`);
+  };
   const reject = (item: WorkItem) => updateItem(item.id, { status: "보류", audit: "반려 또는 보완 요청" }, `${item.id} 보류 처리`);
   const remove = (id: string) => {
     setItems((current) => current.filter((item) => item.id !== id));
@@ -264,7 +295,8 @@ export function OpsConsole() {
       description: form.description,
       amount: form.amount,
       vendor: form.vendor,
-      approvalStep: 0
+      approvalStep: 0,
+      source: "admin_console"
     });
     setForm(defaultForm);
   };
@@ -282,7 +314,8 @@ export function OpsConsole() {
       audit: "예산 산출 및 승인 라우팅 완료",
       amount: `${equipment.count}대 / ${total.toLocaleString("ko-KR")}원`,
       vendor: "미정",
-      approvalStep: total >= 10000000 ? 2 : 1
+      approvalStep: total >= 10000000 ? 2 : 1,
+      source: "admin_console"
     });
   };
 
