@@ -417,18 +417,20 @@ export function OpsConsole() {
 
   const createEquipment = () => {
     const total = equipment.count * equipment.unitPrice;
+    const needsAccountingConfirm = total > 500000;
     addRequest({
       module: "전산 장비",
       title: `${equipment.campus} ${equipment.item} ${equipment.count}대 구매`,
       requester: equipment.campus,
       owner: "경영지원",
-      status: total >= 10000000 ? "승인 대기" : "검토",
-      priority: total >= 10000000 ? "높음" : "보통",
+      status: needsAccountingConfirm ? "승인 대기" : "검토",
+      priority: needsAccountingConfirm ? "높음" : "보통",
       due: equipment.neededDate || "이번 주",
-      audit: "예산 산출 및 승인 라우팅 완료",
+      audit: needsAccountingConfirm ? "50만원 초과 구매로 회계팀 컨펌 필요" : "예산 산출 및 승인 라우팅 완료",
       amount: `${equipment.count}대 / ${total.toLocaleString("ko-KR")}원`,
       vendor: "미정",
       description: [
+        needsAccountingConfirm ? "안내: 50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "",
         `처리 분류: ${equipment.processType}`,
         `품목: ${equipment.item}`,
         `수량: ${equipment.count}`,
@@ -436,8 +438,8 @@ export function OpsConsole() {
         `사용 목적: ${equipment.purpose || "미입력"}`,
         `직무: ${equipment.roles.length ? equipment.roles.join(", ") : "미선택"}`,
         `전달 사항: ${equipment.notes || "없음"}`
-      ].join("\n"),
-      approvalStep: total >= 10000000 ? 2 : 1,
+      ].filter(Boolean).join("\n"),
+      approvalStep: needsAccountingConfirm ? 2 : 1,
       source: "admin_console"
     });
   };
@@ -956,8 +958,8 @@ function EquipmentScreen({ equipment, setEquipment, createEquipment }: { equipme
         </div>
 
         <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
-          <p className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-800">
-            총액 {total.toLocaleString("ko-KR")}원 · {total >= 10000000 ? "경영진 승인 필요" : "관리자 검토"}
+          <p className={`rounded-xl p-3 text-sm font-semibold ${total > 500000 ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"}`}>
+            총액 {total.toLocaleString("ko-KR")}원 · {total > 500000 ? "50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "관리자 검토"}
           </p>
           <button onClick={createEquipment} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white hover:bg-blue-700">
             <FilePlus2 className="h-4 w-4" aria-hidden="true" />
