@@ -365,29 +365,52 @@ export function OpsConsole() {
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-[#f7f4ee]/88 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Academy Ops Hub</p>
             <h1 className="text-xl font-bold">운영 통합 콘솔</h1>
           </div>
-          <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-slate-200 bg-white/80 px-3 py-2 shadow-sm md:flex">
+          <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 md:flex">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="요청 번호, 캠퍼스, 담당 검색" />
           </div>
-          <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="focus-ring h-10 rounded-lg border border-slate-200 bg-white/85 px-3 text-sm font-semibold shadow-sm" aria-label="역할 선택">
+          <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="focus-ring h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold" aria-label="역할 선택">
             {roles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <span className="hidden rounded-lg bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600 lg:inline-flex">{syncState}</span>
-          <button onClick={signOut} className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white shadow-sm" aria-label="로그아웃">
+          <button onClick={signOut} className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700" aria-label="로그아웃">
             <LogOut className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 lg:grid-cols-[256px_minmax(0,1fr)] lg:px-8">
         <nav className="lg:sticky lg:top-[73px] lg:self-start">
-          <div className="surface flex gap-2 overflow-x-auto rounded-xl p-2 lg:grid">
+          <div className="surface flex gap-2 overflow-x-auto rounded-lg p-4 lg:grid">
+            <div className="hidden border-b border-gray-200 pb-4 lg:block">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
+                  <HardDrive className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="font-bold">Ops Hub</p>
+                  <p className="text-xs text-gray-500">v0.1.0</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-gray-600">업무 부하</span>
+                  <span className="text-gray-900">{pendingCount}</span>
+                </div>
+                <div className="progress-track"><div className="progress-fill" style={{ width: `${Math.min(pendingCount * 12, 100)}%` }} /></div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-gray-600">승인 대기</span>
+                  <span className="text-gray-900">{approvalCount}</span>
+                </div>
+                <div className="progress-track"><div className="h-full rounded-full bg-yellow-500" style={{ width: `${Math.min(approvalCount * 18, 100)}%` }} /></div>
+              </div>
+            </div>
             {menuItems.map((item) => {
               const Icon = item.icon;
               const active = activeMenu === item.key;
@@ -395,7 +418,7 @@ export function OpsConsole() {
                 <button
                   key={item.key}
                   onClick={() => setActiveMenu(item.key)}
-                  className={`focus-ring inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-white hover:text-slate-900"}`}
+                  className={`focus-ring inline-flex h-10 shrink-0 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition ${active ? "border border-blue-200 bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"}`}
                 >
                   <Icon className="h-4 w-4" aria-hidden="true" />
                   {item.label}
@@ -496,13 +519,13 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
         {modules.map((module) => {
           const Icon = module.icon;
           return (
-            <article key={module.name} className="surface-strong rounded-xl p-4 transition hover:-translate-y-0.5 hover:shadow-[0_22px_45px_rgba(15,23,42,0.1)]">
-              <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${module.tone}`}>
+            <article key={module.name} className="surface-strong rounded-lg p-5">
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </div>
               <h3 className="mt-4 text-sm font-bold">{module.name}</h3>
               <p className="mt-1 min-h-10 text-sm text-muted-foreground">{module.description}</p>
-              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-sm font-semibold transition hover:bg-slate-900 hover:text-white">
+              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50">
                 열기
               </button>
             </article>
@@ -515,10 +538,10 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
 
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
   return (
-    <article className="surface-strong rounded-xl p-4">
+    <article className="surface-strong rounded-lg p-5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm text-muted-foreground">{label}</span>
-        <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
+        <Icon className="h-5 w-5 text-gray-500" aria-hidden="true" />
       </div>
       <strong className="mt-3 block text-3xl">{value}</strong>
     </article>
@@ -554,10 +577,10 @@ function QueueScreen(props: {
 
 function QueueTable(props: { items: WorkItem[]; role: UserRole; status: WorkStatus | "전체"; setStatus: (value: WorkStatus | "전체") => void; setSelectedId: (value: string) => void; approve: (item: WorkItem) => void; reject: (item: WorkItem) => void; remove: (id: string) => void }) {
   return (
-    <section className="surface-strong min-w-0 overflow-hidden rounded-xl">
+    <section className="surface-strong min-w-0 overflow-hidden rounded-lg">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3">
         <h3 className="font-bold">업무 목록</h3>
-        <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-2">
+        <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
           <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <select value={props.status} onChange={(event) => props.setStatus(event.target.value as WorkStatus | "전체")} className="bg-transparent text-sm outline-none" aria-label="상태 필터">
             {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -572,9 +595,9 @@ function QueueTable(props: { items: WorkItem[]; role: UserRole; status: WorkStat
           <tbody>
             {props.items.map((item) => (
               <tr key={item.id} className="border-t border-border">
-                <td className="px-4 py-3 font-bold text-teal-700">{item.id}</td>
+                <td className="px-4 py-3 font-bold text-blue-700">{item.id}</td>
                 <td className="px-4 py-3">
-                  <button onClick={() => props.setSelectedId(item.id)} className="text-left font-semibold hover:text-teal-700">{item.title}</button>
+                  <button onClick={() => props.setSelectedId(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
                   <div className="mt-1 text-xs text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
                 </td>
                 <td className="px-4 py-3"><StatusPill status={item.status} /></td>
@@ -606,7 +629,7 @@ function EquipmentScreen({ equipment, setEquipment, createEquipment }: { equipme
           <input type="number" value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field" aria-label="수량" />
         </div>
         <input type="number" value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field" aria-label="단가" />
-        <p className="rounded-lg bg-teal-50 p-3 text-sm text-teal-800">총액 {total.toLocaleString("ko-KR")}원 · {total >= 10000000 ? "경영진 승인 필요" : "관리자 검토"}</p>
+        <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">총액 {total.toLocaleString("ko-KR")}원 · {total >= 10000000 ? "경영진 승인 필요" : "관리자 검토"}</p>
         <ActionButton onClick={createEquipment} label="구매 요청 생성" />
       </FormPanel>
     </Screen>
@@ -617,8 +640,8 @@ function AsScreen({ symptom, setSymptom, diagnosis, createAsTicket }: { symptom:
   return (
     <Screen title="A/S" desc="증상 진단 후 내부 처리 또는 업체 접수로 라우팅합니다.">
       <FormPanel icon={Stethoscope} title="증상 진단">
-        <textarea value={symptom} onChange={(event) => setSymptom(event.target.value)} className="min-h-32 rounded-lg border border-slate-200 bg-white/80 p-3 text-sm outline-none focus:border-teal-700" aria-label="증상" />
-        <p className="rounded-lg bg-orange-50 p-3 text-sm text-orange-800">{diagnosis}</p>
+        <textarea value={symptom} onChange={(event) => setSymptom(event.target.value)} className="min-h-32 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" aria-label="증상" />
+        <p className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">{diagnosis}</p>
         <ActionButton onClick={createAsTicket} label="A/S 요청 생성" />
       </FormPanel>
     </Screen>
@@ -670,9 +693,9 @@ function AuditScreen({ audit, resetLocal }: { audit: AuditEvent[]; resetLocal: (
 
 function FormPanel({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
-    <section className="surface-strong max-w-xl rounded-xl p-4">
+    <section className="surface-strong max-w-xl rounded-lg p-5">
       <div className="mb-3 flex items-center gap-2">
-        <Icon className="h-5 w-5 text-teal-700" aria-hidden="true" />
+        <Icon className="h-5 w-5 text-blue-600" aria-hidden="true" />
         <h3 className="font-bold">{title}</h3>
       </div>
       <div className="grid gap-3">{children}</div>
@@ -681,16 +704,16 @@ function FormPanel({ title, icon: Icon, children }: { title: string; icon: Lucid
 }
 
 function ActionButton({ onClick, label }: { onClick: () => void; label: string }) {
-  return <button onClick={onClick} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"><FilePlus2 className="h-4 w-4" aria-hidden="true" />{label}</button>;
+  return <button onClick={onClick} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700"><FilePlus2 className="h-4 w-4" aria-hidden="true" />{label}</button>;
 }
 
 function IconButton({ label, disabled, onClick, icon: Icon, tone }: { label: string; disabled: boolean; onClick: () => void; icon: LucideIcon; tone: string }) {
-  return <button onClick={onClick} disabled={disabled} className={`focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/70 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30 ${tone}`} aria-label={label}><Icon className="h-4 w-4" aria-hidden="true" /></button>;
+  return <button onClick={onClick} disabled={disabled} className={`focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30 ${tone}`} aria-label={label}><Icon className="h-4 w-4" aria-hidden="true" /></button>;
 }
 
 function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void }) {
   return (
-    <section className="surface-strong rounded-xl p-4">
+    <section className="surface-strong rounded-lg p-5">
       <h3 className="font-bold">직접 요청</h3>
       <div className="mt-3 grid gap-3">
         <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value })} className="field" aria-label="모듈">
@@ -705,7 +728,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
         </div>
         <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="field" placeholder="예산 또는 수량" />
         <input value={form.vendor} onChange={(event) => setForm({ ...form, vendor: event.target.value })} className="field" placeholder="업체" />
-        <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-20 rounded-lg border border-slate-200 bg-white/80 p-3 text-sm outline-none focus:border-teal-700" placeholder="상세 내용" />
+        <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-20 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="상세 내용" />
         <ActionButton onClick={createRequest} label="접수" />
       </div>
     </section>
@@ -714,9 +737,9 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
 
 function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: UserRole; approve: () => void; reject: () => void }) {
   return (
-    <section className="surface-strong rounded-xl p-4">
+    <section className="surface-strong rounded-lg p-5">
       <div className="flex items-start justify-between gap-3">
-        <div><p className="text-xs font-bold text-teal-700">{item.id}</p><h3 className="mt-1 font-bold">{item.title}</h3></div>
+        <div><p className="text-xs font-bold text-blue-700">{item.id}</p><h3 className="mt-1 font-bold">{item.title}</h3></div>
         <StatusPill status={item.status} />
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -724,8 +747,8 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
       </dl>
       <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 whitespace-pre-line">{item.description || item.audit}</p>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <button disabled={!canApprove(role, item)} onClick={approve} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-teal-700 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" aria-hidden="true" />승인</button>
-        <button disabled={!canApprove(role, item)} onClick={reject} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white/70 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"><X className="h-4 w-4" aria-hidden="true" />보류</button>
+        <button disabled={!canApprove(role, item)} onClick={approve} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" aria-hidden="true" />승인</button>
+        <button disabled={!canApprove(role, item)} onClick={reject} className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"><X className="h-4 w-4" aria-hidden="true" />보류</button>
       </div>
     </section>
   );
@@ -737,10 +760,10 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function AuditLog({ audit, resetLocal }: { audit: AuditEvent[]; resetLocal: () => void }) {
   return (
-    <section className="surface-strong rounded-xl p-4">
-      <div className="flex items-center justify-between gap-3"><h3 className="font-bold">감사 로그</h3><button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white/70 px-3 text-xs font-semibold">초기화</button></div>
+    <section className="surface-strong rounded-lg p-5">
+      <div className="flex items-center justify-between gap-3"><h3 className="font-bold">감사 로그</h3><button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold hover:bg-gray-50">초기화</button></div>
       <div className="mt-3 grid gap-2">
-        {audit.map((item) => <div key={item.id} className="grid gap-2 rounded-lg border border-slate-200/80 bg-white/60 px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{item.event}</span></div>)}
+        {audit.map((item) => <div key={item.id} className="grid gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{item.event}</span></div>)}
       </div>
     </section>
   );
@@ -748,12 +771,12 @@ function AuditLog({ audit, resetLocal }: { audit: AuditEvent[]; resetLocal: () =
 
 function AiHarness() {
   return (
-    <section className="surface-strong rounded-xl p-4">
-      <div className="flex items-center gap-2"><UserCog className="h-5 w-5 text-teal-700" aria-hidden="true" /><h3 className="font-bold">AI Harness</h3></div>
+    <section className="surface-strong rounded-lg p-5">
+      <div className="flex items-center gap-2"><UserCog className="h-5 w-5 text-blue-600" aria-hidden="true" /><h3 className="font-bold">AI Harness</h3></div>
       <div className="mt-3 space-y-3">
         {aiHarnessSteps.map((step) => {
           const Icon = step.icon;
-          return <div key={step.label} className="flex gap-3 text-sm"><Icon className="mt-0.5 h-4 w-4 text-orange-600" aria-hidden="true" /><div><strong>{step.label}</strong><p className="text-muted-foreground">{step.text}</p></div></div>;
+          return <div key={step.label} className="flex gap-3 text-sm"><Icon className="mt-0.5 h-4 w-4 text-blue-600" aria-hidden="true" /><div><strong>{step.label}</strong><p className="text-muted-foreground">{step.text}</p></div></div>;
         })}
       </div>
     </section>
