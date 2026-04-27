@@ -151,7 +151,7 @@ export function UserPortal() {
                     <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${item.tone}`}>
                       <Icon className="h-5 w-5" aria-hidden="true" />
                     </div>
-                    <p className="mt-3 font-bold">{item.title}</p>
+                    <p className="mt-3 whitespace-nowrap text-sm font-bold">{item.title}</p>
                     <p className="mt-1 text-xs text-gray-500">{item.desc}</p>
                   </button>
                 );
