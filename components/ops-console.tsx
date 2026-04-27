@@ -43,7 +43,17 @@ type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = { item: string; count: number; unitPrice: number; campus: string };
 type SublyForm = { item: string; quantity: number; vendor: string; delivery: string };
-type WebDavTargetInput = { id: string; name: string; url: string; username: string; password: string };
+type WebDavTargetInput = {
+  id: string;
+  name: string;
+  protocol: "https" | "http";
+  host: string;
+  port: string;
+  path: string;
+  url: string;
+  username: string;
+  password: string;
+};
 type WebDavResult = {
   ok: boolean;
   configured: boolean;
@@ -118,6 +128,28 @@ function makeId(items: WorkItem[]) {
   return `AOH-${max + 1}`;
 }
 
+function buildWebDavUrl(target: WebDavTargetInput) {
+  if (!target.host.trim()) return target.url.trim();
+  const cleanHost = target.host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const cleanPath = target.path.startsWith("/") ? target.path : `/${target.path}`;
+  const port = target.port ? `:${target.port}` : "";
+  return `${target.protocol}://${cleanHost}${port}${cleanPath}`;
+}
+
+function normalizeWebDavTarget(target: Partial<WebDavTargetInput>): WebDavTargetInput {
+  return {
+    id: target.id ?? target.name?.replace(/\s+/g, "-").toLowerCase() ?? "nas",
+    name: target.name ?? "NAS",
+    protocol: target.protocol ?? "https",
+    host: target.host ?? "",
+    port: target.port ?? (target.protocol === "http" ? "5005" : "5006"),
+    path: target.path ?? "/webdav/",
+    url: target.url ?? "",
+    username: target.username ?? "",
+    password: target.password ?? ""
+  };
+}
+
 function isAdminRole(role: UserRole) {
   return role === "academy_admin" || role === "super_admin" || role === "nas_admin" || role === "executive";
 }
@@ -148,6 +180,10 @@ export function OpsConsole() {
   const [webdavDraft, setWebdavDraft] = useState<WebDavTargetInput>({
     id: "main",
     name: "메인 NAS",
+    protocol: "https",
+    host: "",
+    port: "5006",
+    path: "/webdav/",
     url: "",
     username: "",
     password: ""
@@ -176,7 +212,7 @@ export function OpsConsole() {
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as WebDavTargetInput[];
-      setWebdavTargets(Array.isArray(parsed) ? parsed : []);
+      setWebdavTargets(Array.isArray(parsed) ? parsed.map(normalizeWebDavTarget) : []);
     } catch {
       window.localStorage.removeItem(webdavTargetsKey);
     }
@@ -437,13 +473,15 @@ export function OpsConsole() {
   };
 
   const addWebDavTarget = () => {
-    if (!webdavDraft.name || !webdavDraft.url || !webdavDraft.username || !webdavDraft.password) return;
+    const url = buildWebDavUrl(webdavDraft);
+    if (!webdavDraft.name || !url || !webdavDraft.username || !webdavDraft.password) return;
     const next = {
       ...webdavDraft,
+      url,
       id: webdavDraft.id || webdavDraft.name.replace(/\s+/g, "-").toLowerCase()
     };
     setWebdavTargets((current) => [next, ...current.filter((item) => item.id !== next.id)]);
-    setWebdavDraft({ id: "", name: "", url: "", username: "", password: "" });
+    setWebdavDraft({ id: "", name: "", protocol: "https", host: "", port: "5006", path: "/webdav/", url: "", username: "", password: "" });
   };
 
   const removeWebDavTarget = (id: string) => {
@@ -938,7 +976,20 @@ function NasScreen({
             <FormPanel icon={HardDrive} title="WebDAV 추가">
               <input value={webdavDraft.name} onChange={(event) => setWebdavDraft({ ...webdavDraft, name: event.target.value })} className="field" placeholder="표시 이름: 메인 NAS" />
               <input value={webdavDraft.id} onChange={(event) => setWebdavDraft({ ...webdavDraft, id: event.target.value })} className="field" placeholder="식별자: main" />
-              <input value={webdavDraft.url} onChange={(event) => setWebdavDraft({ ...webdavDraft, url: event.target.value })} className="field" placeholder="WebDAV URL" />
+              <div className="grid grid-cols-[100px_1fr] gap-2">
+                <select value={webdavDraft.protocol} onChange={(event) => setWebdavDraft({ ...webdavDraft, protocol: event.target.value as "https" | "http", port: event.target.value === "https" ? "5006" : "5005" })} className="field" aria-label="프로토콜">
+                  <option value="https">https</option>
+                  <option value="http">http</option>
+                </select>
+                <input value={webdavDraft.host} onChange={(event) => setWebdavDraft({ ...webdavDraft, host: event.target.value })} className="field" placeholder="NAS 주소: 192.168.0.25 또는 nas.example.com" />
+              </div>
+              <div className="grid grid-cols-[110px_1fr] gap-2">
+                <input value={webdavDraft.port} onChange={(event) => setWebdavDraft({ ...webdavDraft, port: event.target.value })} className="field" placeholder="포트" />
+                <input value={webdavDraft.path} onChange={(event) => setWebdavDraft({ ...webdavDraft, path: event.target.value })} className="field" placeholder="경로: /webdav/" />
+              </div>
+              <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-800">
+                연결 URL: {buildWebDavUrl(webdavDraft) || "주소를 입력하세요"}
+              </p>
               <input value={webdavDraft.username} onChange={(event) => setWebdavDraft({ ...webdavDraft, username: event.target.value })} className="field" placeholder="아이디" />
               <input value={webdavDraft.password} onChange={(event) => setWebdavDraft({ ...webdavDraft, password: event.target.value })} className="field" placeholder="비밀번호" type="password" />
               <ActionButton onClick={addWebDavTarget} label="WebDAV 추가" />
