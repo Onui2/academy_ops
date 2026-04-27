@@ -30,6 +30,7 @@ import {
   createRequest as createDbRequest,
   deleteRequest as deleteDbRequest,
   ensureProfile,
+  fetchProfileRole,
   fetchRequests,
   updateRequestStatus
 } from "@/lib/ops-repository";
@@ -48,7 +49,8 @@ type WebDavResult = {
   status?: number;
   latencyMs?: number;
   message: string;
-  items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }>;
+  targets?: Array<{ id: string; name: string; ok: boolean; status?: number; latencyMs?: number; message: string; items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }> }>;
+  items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null; targetName?: string }>;
 };
 
 const storageKey = "academy-ops-hub-state-v2";
@@ -114,6 +116,10 @@ function makeId(items: WorkItem[]) {
   return `AOH-${max + 1}`;
 }
 
+function isAdminRole(role: UserRole) {
+  return role === "academy_admin" || role === "super_admin" || role === "nas_admin" || role === "executive";
+}
+
 export function OpsConsole() {
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
@@ -123,7 +129,7 @@ export function OpsConsole() {
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [syncState, setSyncState] = useState("데모 모드");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
-  const [role, setRole] = useState<UserRole>("academy_admin");
+  const [role, setRole] = useState<UserRole>("super_admin");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
   const [audit, setAudit] = useState<AuditEvent[]>(initialAudit);
   const [query, setQuery] = useState("");
@@ -160,6 +166,8 @@ export function OpsConsole() {
     try {
       setSyncState("DB 동기화 중");
       await ensureProfile(supabase, nextUser);
+      const profileRole = await fetchProfileRole(supabase, nextUser);
+      setRole(profileRole);
       const rows = await fetchRequests(supabase);
       setItems(rows.length ? rows : seedItems);
       setSelectedId(rows[0]?.id ?? seedItems[0]?.id ?? "");
@@ -214,6 +222,13 @@ export function OpsConsole() {
   const pendingCount = items.filter((item) => item.status !== "완료").length;
   const approvalCount = items.filter((item) => item.status === "승인 대기").length;
   const riskCount = items.filter((item) => item.priority === "긴급" || item.status === "보류").length;
+  const visibleMenuItems = menuItems.filter((item) => item.key !== "audit" || isAdminRole(role));
+
+  useEffect(() => {
+    if (activeMenu === "audit" && !isAdminRole(role)) {
+      setActiveMenu("dashboard");
+    }
+  }, [activeMenu, role]);
 
   const addAudit = (actor: string, event: string) => {
     const at = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
@@ -439,9 +454,9 @@ export function OpsConsole() {
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="요청 번호, 캠퍼스, 담당 검색" />
           </div>
-          <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="focus-ring h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold" aria-label="역할 선택">
-            {roles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
+          <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold">
+            {roles.find((item) => item.value === role)?.label ?? "관리자"}
+          </span>
           <span className="hidden rounded-lg bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600 lg:inline-flex">{syncState}</span>
           <button onClick={signOut} className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700" aria-label="로그아웃">
             <LogOut className="h-5 w-5" aria-hidden="true" />
@@ -475,7 +490,7 @@ export function OpsConsole() {
                 <div className="progress-track"><div className="h-full rounded-full bg-yellow-500" style={{ width: `${Math.min(approvalCount * 18, 100)}%` }} /></div>
               </div>
             </div>
-            {menuItems.map((item) => {
+            {visibleMenuItems.map((item) => {
               const Icon = item.icon;
               const active = activeMenu === item.key;
               return (
@@ -828,6 +843,23 @@ function NasScreen({
               {webdav?.latencyMs ? <p className="mt-2 text-xs text-gray-500">응답 {webdav.latencyMs}ms · HTTP {webdav.status ?? "-"}</p> : null}
             </div>
 
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              {(webdav?.targets ?? []).map((target) => (
+                <div key={target.id} className="rounded-2xl border border-gray-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold">{target.name}</p>
+                      <p className="text-xs text-gray-500">{target.message}</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-xs font-bold ${target.ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                      {target.ok ? "온라인" : "오프라인"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">HTTP {target.status ?? "-"} · {target.latencyMs ?? "-"}ms · {target.items.length} items</p>
+                </div>
+              ))}
+            </div>
+
             <div className="mt-4 grid gap-2">
               {(webdav?.items ?? []).length ? (
                 webdav!.items.map((item) => (
@@ -835,6 +867,7 @@ function NasScreen({
                     <div className="flex min-w-0 items-center gap-2">
                       <FolderOpen className={`h-4 w-4 ${item.type === "folder" ? "text-blue-600" : "text-gray-500"}`} aria-hidden="true" />
                       <span className="truncate font-medium">{item.name}</span>
+                      {item.targetName ? <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">{item.targetName}</span> : null}
                     </div>
                     <span className="text-xs text-gray-500">{item.size ? `${Math.round(item.size / 1024)}KB` : item.type}</span>
                   </div>

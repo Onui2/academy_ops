@@ -84,6 +84,7 @@ export function UserPortal() {
   });
   const [submitted, setSubmitted] = useState<RequestDraft[]>([]);
   const [query, setQuery] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
 
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
   const helperText = useMemo(() => {
@@ -106,7 +107,7 @@ export function UserPortal() {
       priority: draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통",
       due: draft.urgency === "긴급" ? "오늘" : "신규",
       audit: "사용자 포털 접수 - 학원 관리자 승인 대기",
-      description: draft.detail,
+      description: files.length ? `${draft.detail}\n\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : draft.detail,
       approvalStep: 0,
       source: "user_portal",
       approvedByAcademyAdmin: false
@@ -114,6 +115,7 @@ export function UserPortal() {
     pushToAdminQueue(item);
     setSubmitted((current) => [{ ...draft }, ...current]);
     setDraft({ ...draft, title: "", detail: "" });
+    setFiles([]);
   };
 
   return (
@@ -196,11 +198,22 @@ export function UserPortal() {
                     {urgency}
                   </button>
                 ))}
-                <button className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+                <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
                   <Paperclip className="h-4 w-4" aria-hidden="true" />
                   파일 첨부
-                </button>
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                  />
+                </label>
               </div>
+              {files.length ? (
+                <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+                  {files.length}개 파일 선택됨: {files.map((file) => file.name).join(", ")}
+                </div>
+              ) : null}
               <button onClick={submit} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700">
                 요청 접수
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />

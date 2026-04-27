@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { UserRole } from "@/types/ops";
 
 type DbStatus = "received" | "reviewing" | "approval_pending" | "in_progress" | "completed" | "blocked";
 type DbPriority = "low" | "normal" | "high" | "urgent";
@@ -74,6 +75,17 @@ export async function ensureProfile(supabase: SupabaseClient, user: User) {
   });
 
   if (error) throw error;
+}
+
+export async function fetchProfileRole(supabase: SupabaseClient, user: User): Promise<UserRole> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data?.role ?? "general") as UserRole;
 }
 
 export async function fetchRequests(supabase: SupabaseClient): Promise<WorkItem[]> {
