@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 42 24% 96%;
+  --foreground: 222 28% 12%;
+  --muted: 220 16% 92%;
+  --muted-foreground: 222 10% 43%;
+  --border: 220 15% 82%;
+  --primary: 174 62% 27%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 25 86% 58%;
+  --accent-foreground: 215 28% 17%;
+  --danger: 4 75% 52%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 280px),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.focus-ring:focus-visible {
+  outline-color: hsl(var(--primary));
+}
+
+.field {
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.field:focus {
+  border-color: hsl(var(--primary));
+  background: white;
+  box-shadow: 0 0 0 3px rgba(28, 123, 115, 0.14);
+}
+
+.surface {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.surface-strong {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
