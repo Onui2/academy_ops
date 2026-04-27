@@ -7,12 +7,15 @@ import {
   ClipboardList,
   FilePlus2,
   Filter,
+  FolderOpen,
   HardDrive,
   Home,
   LogOut,
   PackageCheck,
   Printer,
+  RefreshCw,
   Search,
+  Server,
   ShieldCheck,
   Stethoscope,
   Trash2,
@@ -39,6 +42,14 @@ type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = { item: string; count: number; unitPrice: number; campus: string };
 type SublyForm = { item: string; quantity: number; vendor: string; delivery: string };
+type WebDavResult = {
+  ok: boolean;
+  configured: boolean;
+  status?: number;
+  latencyMs?: number;
+  message: string;
+  items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }>;
+};
 
 const storageKey = "academy-ops-hub-state-v2";
 
@@ -123,6 +134,8 @@ export function OpsConsole() {
   const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [subly, setSubly] = useState<SublyForm>({ item: "겨울 방학 홍보물", quantity: 1500, vendor: "Subly Print", delivery: "4월 30일" });
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
+  const [webdav, setWebdav] = useState<WebDavResult | null>(null);
+  const [webdavLoading, setWebdavLoading] = useState(false);
 
   useEffect(() => {
     if (supabase) return;
@@ -358,6 +371,24 @@ export function OpsConsole() {
     description: "신규 직원 공용 NAS 접속 권한과 RaiDrive 안내 필요"
   });
 
+  const checkWebDav = async () => {
+    setWebdavLoading(true);
+    try {
+      const response = await fetch("/api/nas/webdav", { cache: "no-store" });
+      const data = await response.json() as WebDavResult;
+      setWebdav(data);
+    } catch (error) {
+      setWebdav({
+        ok: false,
+        configured: true,
+        message: error instanceof Error ? error.message : "WebDAV check failed",
+        items: []
+      });
+    } finally {
+      setWebdavLoading(false);
+    }
+  };
+
   const resetLocal = () => {
     if (supabase) {
       void loadDbRequests();
@@ -482,7 +513,7 @@ export function OpsConsole() {
               {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "subly" ? <SublyScreen subly={subly} setSubly={setSubly} createSubly={createSubly} /> : null}
-              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} /> : null}
+              {activeMenu === "nas" ? <NasScreen nasUser={nasUser} setNasUser={setNasUser} createNasRequest={createNasRequest} webdav={webdav} webdavLoading={webdavLoading} checkWebDav={checkWebDav} /> : null}
               {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
             </>
           )}
@@ -732,17 +763,93 @@ function SublyScreen({ subly, setSubly, createSubly }: { subly: SublyForm; setSu
   );
 }
 
-function NasScreen({ nasUser, setNasUser, createNasRequest }: { nasUser: string; setNasUser: (value: string) => void; createNasRequest: () => void }) {
+function NasScreen({
+  nasUser,
+  setNasUser,
+  createNasRequest,
+  webdav,
+  webdavLoading,
+  checkWebDav
+}: {
+  nasUser: string;
+  setNasUser: (value: string) => void;
+  createNasRequest: () => void;
+  webdav: WebDavResult | null;
+  webdavLoading: boolean;
+  checkWebDav: () => void;
+}) {
   return (
     <Screen title="NAS" desc="용량과 권한 상태를 확인하고 접속 권한 요청을 생성합니다.">
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="grid gap-3 sm:grid-cols-3">
-          {nasMetrics.map((metric) => <Metric key={metric.label} label={metric.label} value={metric.value} icon={HardDrive} />)}
+      <section className="grid gap-5">
+        <div className="grid gap-3 md:grid-cols-3">
+          {nasMetrics.map((metric) => (
+            <article key={metric.label} className="surface-strong rounded-2xl p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">{metric.label}</span>
+                <HardDrive className="h-5 w-5 text-gray-500" aria-hidden="true" />
+              </div>
+              <div className="mt-4 text-3xl font-bold">{metric.value}</div>
+              <p className="mt-1 text-xs text-gray-500">{metric.detail}</p>
+              <div className="mt-3 progress-track">
+                <div className={`h-full rounded-full ${metric.health === "주의" ? "bg-yellow-500" : metric.health === "위험" ? "bg-red-500" : "bg-green-500"}`} style={{ width: metric.value.includes("%") ? metric.value : "62%" }} />
+              </div>
+            </article>
+          ))}
         </div>
-        <FormPanel icon={HardDrive} title="권한 요청">
-          <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field" aria-label="NAS 사용자" />
-          <ActionButton onClick={createNasRequest} label="권한 요청 생성" />
-        </FormPanel>
+
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="surface-strong rounded-2xl p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+                  <Server className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 className="font-bold">WebDAV 연결 확인</h3>
+                  <p className="text-sm text-gray-500">NAS_WEBDAV_URL 환경변수로 실제 NAS 상태를 확인합니다.</p>
+                </div>
+              </div>
+              <button onClick={checkWebDav} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">
+                <RefreshCw className={`h-4 w-4 ${webdavLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+                확인
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">상태</p>
+                  <p className="text-sm text-gray-500">{webdav?.message ?? "아직 확인하지 않았습니다."}</p>
+                </div>
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${webdav?.ok ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"}`}>
+                  {webdav?.ok ? "연결됨" : webdav?.configured === false ? "설정 필요" : "대기"}
+                </span>
+              </div>
+              {webdav?.latencyMs ? <p className="mt-2 text-xs text-gray-500">응답 {webdav.latencyMs}ms · HTTP {webdav.status ?? "-"}</p> : null}
+            </div>
+
+            <div className="mt-4 grid gap-2">
+              {(webdav?.items ?? []).length ? (
+                webdav!.items.map((item) => (
+                  <div key={`${item.path}-${item.name}`} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FolderOpen className={`h-4 w-4 ${item.type === "folder" ? "text-blue-600" : "text-gray-500"}`} aria-hidden="true" />
+                      <span className="truncate font-medium">{item.name}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">{item.size ? `${Math.round(item.size / 1024)}KB` : item.type}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">WebDAV 항목 없음</p>
+              )}
+            </div>
+          </section>
+
+          <FormPanel icon={HardDrive} title="권한 요청">
+            <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field" aria-label="NAS 사용자" />
+            <ActionButton onClick={createNasRequest} label="권한 요청 생성" />
+          </FormPanel>
+        </div>
       </section>
     </Screen>
   );
