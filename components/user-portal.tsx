@@ -251,12 +251,6 @@ export function UserPortal() {
   }, [draft.category]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
   const estimatedOwner = draft.category === "nas" ? "NAS 관리자" : draft.category === "as" ? "전산" : "학원 관리자";
-  const routingSteps = [
-    "요청 접수",
-    draft.category === "as" ? "자가 진단/FAQ 이력 확인" : "운영팀 분류",
-    draft.urgency === "긴급" ? "우선 검토" : `${estimatedOwner} 확인`,
-    draft.category === "nas" ? "권한 또는 접속 가이드 처리" : "승인 또는 일정 조율"
-  ];
 
   const submit = async () => {
     if (!draft.title.trim()) return;
@@ -695,21 +689,6 @@ export function UserPortal() {
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                 {draft.urgency === "긴급" ? "긴급 사유가 포함되면 우선 검토 대상으로 바로 올라갑니다." : "일반 요청은 접수 후 운영팀 분류를 거쳐 담당자에게 전달됩니다."}
               </div>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-600">Routing</p>
-            <h2 className="mt-1 font-black text-slate-900">처리 흐름 안내</h2>
-            <div className="mt-4 grid gap-3">
-              {routingSteps.map((step, index) => (
-                <div key={step} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[11px] font-black text-white">
-                    {index + 1}
-                  </div>
-                  <p className="pt-0.5 text-sm font-medium text-slate-700">{step}</p>
-                </div>
-              ))}
             </div>
           </section>
 
