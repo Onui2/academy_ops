@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  CalendarDays,
   FilePlus2,
   Filter,
   FolderOpen,
@@ -31,28 +32,41 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { 
   aiHarnessSteps, 
   equipmentParts, 
-  equipmentPresets,
   modules, 
-  nasMetrics, 
   workItems as seedItems 
 } from "@/lib/ops-data";
+import { diagnosisPatterns } from "@/lib/diagnosis-data";
 import { createClient } from "@/lib/supabase";
 import {
   createAuditLog,
+  createNasPermissionRequest,
   createRequest as createDbRequest,
+  decideApprovalStep,
   deleteRequest as deleteDbRequest,
   ensureProfile,
+  fetchNasPermissions,
   fetchProfileRole,
   fetchRequests,
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
-import type { EquipmentConfig, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
 type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
-type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
+type RequestForm = {
+  module: string;
+  requestItem: string;
+  title: string;
+  requester: string;
+  requesterContact: string;
+  neededDate: string;
+  priority: WorkPriority;
+  description: string;
+  amount: string;
+  vendor: string;
+};
 type EquipmentForm = {
   item: string;
   count: number;
@@ -64,6 +78,16 @@ type EquipmentForm = {
   purpose: string;
   roles: string[];
   notes: string;
+};
+type TabletForm = {
+  academy: string;
+  model: string;
+  count: number;
+  duration: string;
+  purpose: string;
+  neededDate: string;
+  requestType: "신규" | "연장" | "반납";
+  assetTag: string;
 };
 type WebDavTargetInput = {
   id: string;
@@ -85,6 +109,36 @@ type WebDavResult = {
   targets?: Array<{ id: string; name: string; ok: boolean; status?: number; latencyMs?: number; message: string; items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null }> }>;
   items: Array<{ name: string; path: string; type: "folder" | "file"; size: number | null; modified: string | null; targetName?: string }>;
 };
+type NasPermissionRecord = {
+  id: string;
+  user_email: string;
+  resource_name: string;
+  permission_level: string;
+  status: string;
+  created_at: string;
+};
+type BasketItem = {
+  id: number;
+  category: string;
+  name: string;
+  price: number;
+  description: string;
+  performanceNote: string;
+  tier: string;
+};
+type FaqCategory = {
+  id: string;
+  title: string;
+  desc: string;
+  items: typeof diagnosisPatterns;
+};
+
+const partsCategories = [
+  { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
+  { id: "Input", name: "주변기기", icon: Headphones, items: ["Keyboard", "Mouse"] },
+  { id: "Cable", name: "케이블/허브", icon: Search, items: ["Cables"] },
+  { id: "Supply", name: "사무 소모품", icon: ClipboardList, items: ["Consumables"] }
+] as const;
 
 const storageKey = "academy-ops-hub-state-v2";
 const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
@@ -117,13 +171,61 @@ const initialAudit: AuditEvent[] = [
 
 const defaultForm: RequestForm = {
   module: "전산 장비",
+  requestItem: "데스크톱 본체",
   title: "",
   requester: "손샘학원(본사)",
+  requesterContact: "",
+  neededDate: new Date().toISOString().slice(0, 10),
   priority: "보통",
   description: "",
   amount: "",
   vendor: ""
 };
+
+const requestItemOptions = ["데스크톱 본체", "노트북", "모니터", "태블릿", "네트워크/NAS", "기타 장비"] as const;
+
+function formatDateLabel(value: string) {
+  if (!value) return "날짜를 선택해 주세요";
+  const date = new Date(`${value}T00:00:00`);
+  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(date);
+}
+
+function isWeekend(date: Date) {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+function addBusinessDays(start: Date, days: number) {
+  const result = new Date(start);
+  let remaining = days;
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1);
+    if (!isWeekend(result)) remaining -= 1;
+  }
+  return result;
+}
+
+function getLeadBusinessDays(form: RequestForm) {
+  if (form.priority === "긴급") return 0;
+  if (form.module === "NAS") return 7;
+  if (form.module !== "전산 장비") return 3;
+  if (form.requestItem === "데스크톱 본체") return 5;
+  if (form.requestItem === "모니터") return 3;
+  if (form.requestItem === "노트북" || form.requestItem === "태블릿") return 4;
+  if (form.requestItem === "네트워크/NAS" || form.requestItem === "기타 장비") return 7;
+  return 4;
+}
+
+function getEarliestSelectableDate(form: RequestForm) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (form.priority === "긴급" && !isWeekend(today)) {
+    return today;
+  }
+
+  return addBusinessDays(today, getLeadBusinessDays(form));
+}
 
 function canApprove(role: UserRole, item: WorkItem) {
   if (role === "super_admin") return item.status !== "완료";
@@ -187,7 +289,7 @@ export function OpsConsole() {
   const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
-  const [partsBasket, setPartsBasket] = useState<any[]>([]);
+  const [partsBasket, setPartsBasket] = useState<BasketItem[]>([]);
   const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
   const [audit, setAudit] = useState<AuditEvent[]>(initialAudit);
@@ -196,7 +298,7 @@ export function OpsConsole() {
   const [selectedId, setSelectedId] = useState(seedItems[0]?.id ?? "");
   const [form, setForm] = useState<RequestForm>(defaultForm);
   const [equipment, setEquipment] = useState<EquipmentForm>({
-    item: "",
+    item: "데스크톱",
     count: 1,
     unitPrice: 0,
     academy: "",
@@ -207,15 +309,20 @@ export function OpsConsole() {
     roles: ["데스크"],
     notes: ""
   });
-  const [tablet, setTablet] = useState({
+  const [tablet, setTablet] = useState<TabletForm>({
     academy: "",
     model: "iPad Air (5th Gen)",
     count: 1,
-    duration: "12개월",
+    duration: "36개월",
     purpose: "교재 열람용",
-    neededDate: new Date().toISOString().slice(0, 10)
+    neededDate: new Date().toISOString().slice(0, 10),
+    requestType: "신규",
+    assetTag: ""
   });
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
+  const [nasResource, setNasResource] = useState("공용 NAS");
+  const [nasPermissionLevel, setNasPermissionLevel] = useState<"read" | "write" | "admin">("read");
+  const [nasPermissionRows, setNasPermissionRows] = useState<NasPermissionRecord[]>([]);
   const [webdav, setWebdav] = useState<WebDavResult | null>(null);
   const [webdavLoading, setWebdavLoading] = useState(false);
   const [webdavTargets, setWebdavTargets] = useState<WebDavTargetInput[]>([]);
@@ -232,19 +339,6 @@ export function OpsConsole() {
   });
   const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
   const [showWebDavModal, setShowWebDavModal] = useState(false);
-  const [config, setConfig] = useState<EquipmentConfig>({
-    parts: { 
-      CPU: "cpu-2", 
-      RAM: "ram-2", 
-      SSD: "ssd-2", 
-      "Graphic Card": "gpu-1",
-      Mainboard: "mb-1",
-      Power: "pwr-1",
-      Case: "case-1",
-      Monitor: "mon-1"
-    },
-    totalPrice: 0
-  });
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: "success" | "error" | "info" }>>([]);
 
   const addToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
@@ -254,19 +348,6 @@ export function OpsConsole() {
       setToasts((current) => current.filter((t) => t.id !== id));
     }, 3000);
   }, []);
-
-  const calculateTotal = useCallback((nextParts: Record<string, string>) => {
-    return Object.values(nextParts).reduce((sum, partId) => {
-      const part = equipmentParts.find((p) => p.id === partId);
-      return sum + (part?.price ?? 0);
-    }, 0);
-  }, []);
-
-  const totalPrice = useMemo(() => calculateTotal(config.parts), [config.parts, calculateTotal]);
-
-  const updateConfig = (category: string, partId: string) => {
-    setConfig({ ...config, parts: { ...config.parts, [category]: partId } });
-  };
 
   useEffect(() => {
     if (supabase) return;
@@ -309,7 +390,9 @@ export function OpsConsole() {
       const profileRole = await fetchProfileRole(supabase, nextUser);
       setRole(profileRole);
       const rows = await fetchRequests(supabase);
+      const nasRows = await fetchNasPermissions(supabase).catch(() => []);
       setItems(rows.length ? rows : seedItems);
+      setNasPermissionRows((nasRows ?? []) as NasPermissionRecord[]);
       setSelectedId(rows[0]?.id ?? seedItems[0]?.id ?? "");
       setSyncState("Supabase 연결됨");
     } catch (error) {
@@ -362,7 +445,7 @@ export function OpsConsole() {
       authListener.subscription.unsubscribe();
       supabase.removeChannel(channel);
     };
-  }, [supabase, loadDbRequests]);
+  }, [supabase, loadDbRequests, user]);
 
   const selectedItem = items.find((item) => item.id === selectedId) ?? items[0];
   const filteredItems = useMemo(() => {
@@ -420,21 +503,21 @@ export function OpsConsole() {
     }
   };
 
-  const updateItem = (id: string, patch: Partial<WorkItem>, event: string) => {
+  const updateItem = async (id: string, patch: Partial<WorkItem>, event: string) => {
     const nextItem = items.find((item) => item.id === id);
     const patched = nextItem ? { ...nextItem, ...patch } : null;
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
     addAudit(roles.find((item) => item.value === role)?.label ?? "사용자", event);
     if (supabase && patched) {
-      updateRequestStatus(supabase, patched).catch((error) => {
+      await updateRequestStatus(supabase, patched).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "상태 저장 실패");
       });
     }
   };
 
-  const approve = (item: WorkItem) => {
+  const approve = async (item: WorkItem) => {
     if (role === "academy_admin" && item.status === "접수") {
-      updateItem(
+      await updateItem(
         item.id,
         {
           status: "승인 대기",
@@ -446,12 +529,17 @@ export function OpsConsole() {
         },
         `${item.id} 학원 관리자 승인`
       );
+      if (supabase) {
+        await decideApprovalStep(supabase, item.id, role, "approved", item.approvalNote).catch((error) => {
+          setSyncState(error instanceof Error ? error.message : "승인 단계 기록 실패");
+        });
+      }
       addToast(`${item.id} 학원 관리자 승인이 완료되었습니다.`, "success");
       return;
     }
 
     if (role === "super_admin" && item.status === "승인 대기") {
-      updateItem(
+      await updateItem(
         item.id,
         {
           status: "진행",
@@ -462,15 +550,30 @@ export function OpsConsole() {
         },
         `${item.id} 최고 관리자 승인`
       );
+      if (supabase) {
+        await decideApprovalStep(supabase, item.id, role, "approved", item.approvalNote).catch((error) => {
+          setSyncState(error instanceof Error ? error.message : "승인 단계 기록 실패");
+        });
+      }
       addToast(`${item.id} 최종 승인이 완료되어 담당자에게 전달되었습니다.`, "success");
       return;
     }
 
-    updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
+    await updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
+    if (supabase) {
+      await decideApprovalStep(supabase, item.id, role, "approved", item.approvalNote).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "승인 단계 기록 실패");
+      });
+    }
     addToast(`${item.id} 승인 처리되었습니다.`, "success");
   };
-  const reject = (item: WorkItem) => {
-    updateItem(item.id, { status: "보류", audit: item.rejectionNote || "반려 또는 보완 요청", rejectionNote: item.rejectionNote || "보완 필요" }, `${item.id} 보류 처리`);
+  const reject = async (item: WorkItem) => {
+    await updateItem(item.id, { status: "보류", audit: item.rejectionNote || "반려 또는 보완 요청", rejectionNote: item.rejectionNote || "보완 필요" }, `${item.id} 보류 처리`);
+    if (supabase) {
+      await decideApprovalStep(supabase, item.id, role, "rejected", item.rejectionNote).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "보류 단계 기록 실패");
+      });
+    }
     addToast(`${item.id} 요청이 보류 처리되었습니다.`, "info");
   };
   const remove = (id: string) => {
@@ -495,9 +598,16 @@ export function OpsConsole() {
       owner: form.module === "NAS" ? "NAS 관리자" : form.module === "A/S" ? "전산" : "경영지원",
       status: "접수",
       priority: form.priority,
-      due: "신규",
+      due: form.neededDate || "신규",
       audit: "Router AI 분류 대기",
-      description: form.description,
+      description: [
+        `요청 부서/지점: ${form.requester}`,
+        `요청 품목: ${form.requestItem || "미지정"}`,
+        `담당 연락처: ${form.requesterContact || "미입력"}`,
+        `희망 처리일: ${form.neededDate || "미정"}`,
+        "",
+        form.description
+      ].filter(Boolean).join("\n"),
       amount: form.amount,
       vendor: form.vendor,
       approvalStep: 0,
@@ -507,27 +617,23 @@ export function OpsConsole() {
   };
 
   const createEquipment = () => {
-    const isDesktop = equipment.item === "데스크톱";
     const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
-    const basePrice = isDesktop ? totalPrice : equipment.unitPrice;
-    const total = (equipment.count * basePrice) + basketTotal;
+    const isDesktop = equipment.item === "데스크톱";
+    const basePrice = isDesktop ? basketTotal : equipment.unitPrice;
+    const total = equipment.count * basePrice;
     const needsAccountingConfirm = total > 500000;
 
     const configLines = isDesktop
       ? [
-          "--- 본체 조립 사양 ---",
-          ...Object.entries(config.parts).map(([cat, id]) => {
-            const part = equipmentParts.find((p) => p.id === id);
-            return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
-          })
+          "--- 부품 메뉴 선택 기준 ---",
+          ...(partsBasket.length > 0
+            ? partsBasket.map((part) => `${part.category}: ${part.name} (${part.price.toLocaleString()}원)`)
+            : ["선택된 부품 없음"])
         ]
       : [];
 
-    const basketLines = partsBasket.length > 0
-      ? [
-          "--- 추가 구성품 (장바구니) ---",
-          ...partsBasket.map(p => `${p.name}: ${p.price.toLocaleString()}원`)
-        ]
+    const basketLines = !isDesktop && partsBasket.length > 0
+      ? ["--- 추가 구성품 (장바구니) ---", ...partsBasket.map(p => `${p.name}: ${p.price.toLocaleString()}원`)]
       : [];
 
     addRequest({
@@ -573,33 +679,65 @@ export function OpsConsole() {
     source: "admin_console"
   });
 
-  const createNasRequest = () => addRequest({
-    module: "NAS",
-    title: `${nasUser} NAS/RaiDrive 권한 요청`,
-    requester: "인사",
-    owner: "NAS 관리자",
-    status: "접수",
-    priority: "보통",
-    due: "오늘",
-    audit: "MFA 확인 필요",
-    description: "신규 직원 공용 NAS 접속 권한과 RaiDrive 안내 필요"
-  });
+  const createNasRequest = async () => {
+    if (!nasUser.trim()) return;
+
+    if (supabase && user) {
+      await createNasPermissionRequest(supabase, {
+        user_email: nasUser.trim(),
+        resource_name: nasResource.trim() || "공용 NAS",
+        permission_level: nasPermissionLevel,
+        requested_by: user.id
+      }).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "NAS 권한 요청 저장 실패");
+      });
+    }
+
+    await addRequest({
+      module: "NAS",
+      title: `${nasUser} ${nasResource} 권한 요청`,
+      requester: "인사",
+      owner: "NAS 관리자",
+      status: "접수",
+      priority: nasPermissionLevel === "admin" ? "높음" : "보통",
+      due: "오늘",
+      audit: "MFA 확인 및 권한 가이드 발송 대기",
+      description: `요청 대상: ${nasUser}\n리소스: ${nasResource}\n권한 수준: ${nasPermissionLevel}\n안내: RaiDrive/WebDAV 접속 가이드 자동 발송 대상`
+    });
+  };
   
-  const createTabletRequest = () => addRequest({
-    module: "태블릿 렌탈",
-    title: `${tablet.academy} ${tablet.model} ${tablet.count}대 렌탈`,
-    requester: tablet.academy,
-    owner: "경영지원",
-    status: "접수",
-    priority: "보통",
-    due: tablet.neededDate,
-    audit: "렌탈 업체 견적 요청 대기",
-    description: `모델: ${tablet.model}\n수량: ${tablet.count}대\n기간: ${tablet.duration}\n용도: ${tablet.purpose}`,
-    amount: `${tablet.count}대 / ${tablet.duration}`,
-    vendor: "미정",
-    approvalStep: 0,
-    source: "admin_console"
-  });
+  const createTabletRequest = () => {
+    const requestLabel = tablet.requestType === "연장" ? "연장" : tablet.requestType === "반납" ? "반납" : "렌탈";
+    const auditNote =
+      tablet.requestType === "연장"
+        ? "만료 일정 확인 후 렌탈 연장 협의"
+        : tablet.requestType === "반납"
+          ? "반납 회수 일정 조율 대기"
+          : "렌탈 업체 견적 요청 대기";
+
+    return addRequest({
+      module: "태블릿 렌탈",
+      title: `${tablet.academy} ${tablet.model} ${tablet.count}대 ${requestLabel}`,
+      requester: tablet.academy,
+      owner: "경영지원",
+      status: "접수",
+      priority: tablet.requestType === "반납" ? "보통" : "높음",
+      due: tablet.neededDate,
+      audit: auditNote,
+      description: [
+        `처리 유형: ${tablet.requestType}`,
+        `모델: ${tablet.model}`,
+        `수량: ${tablet.count}대`,
+        `기간: ${tablet.duration}`,
+        `용도: ${tablet.purpose}`,
+        tablet.assetTag ? `자산 태그: ${tablet.assetTag}` : ""
+      ].filter(Boolean).join("\n"),
+      amount: `${tablet.count}대 / ${tablet.duration}`,
+      vendor: "미정",
+      approvalStep: 0,
+      source: "admin_console"
+    });
+  };
 
   const checkWebDav = async () => {
     setWebdavLoading(true);
@@ -784,14 +922,19 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} totalPrice={totalPrice} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
-              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} setEquipment={setEquipment} equipment={equipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
               {activeMenu === "tablet" ? <TabletScreen tablet={tablet} setTablet={setTablet} createTabletRequest={createTabletRequest} role={role} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
                 <NasScreen 
                   nasUser={nasUser} 
                   setNasUser={setNasUser} 
+                  nasResource={nasResource}
+                  setNasResource={setNasResource}
+                  nasPermissionLevel={nasPermissionLevel}
+                  setNasPermissionLevel={setNasPermissionLevel}
+                  nasPermissionRows={nasPermissionRows}
                   createNasRequest={createNasRequest} 
                   webdav={webdav} 
                   webdavLoading={webdavLoading} 
@@ -1157,30 +1300,22 @@ function EquipmentScreen({
   equipment,
   setEquipment,
   createEquipment,
-  config,
-  setConfig,
-  updateConfig,
-  totalPrice,
   partsBasket,
   setPartsBasket
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
   createEquipment: () => void;
-  config: EquipmentConfig;
-  setConfig: (config: EquipmentConfig) => void;
-  updateConfig: (category: string, partId: string) => void;
-  totalPrice: number;
-  partsBasket: any[];
-  setPartsBasket: (v: any[]) => void;
+  partsBasket: BasketItem[];
+  setPartsBasket: (v: BasketItem[]) => void;
 }) {
-  const isDesktop = equipment.item === "데스크톱";
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
-  const basePrice = isDesktop ? totalPrice : equipment.unitPrice;
-  const total = (equipment.count * basePrice) + basketTotal;
+  const isDesktop = equipment.item === "데스크톱";
+  const basePrice = isDesktop ? basketTotal : equipment.unitPrice;
+  const total = equipment.count * basePrice;
 
   return (
-    <Screen title="장비 구매" desc="컴퓨터 장비 구매 요청을 작성합니다. 데스크탑은 세부 부품을 직접 구성할 수 있습니다.">
+    <Screen title="장비 구매" desc="장비 종류를 선택해 요청하고, 데스크톱은 부품 메뉴에서 담은 구성을 기준으로 접수합니다.">
       <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <section className="surface-strong overflow-hidden rounded-2xl">
           <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
@@ -1190,7 +1325,7 @@ function EquipmentScreen({
             <div>
               <h3 className="font-bold">장비 사양 및 요청서</h3>
               <p className="text-sm text-slate-500">
-                {isDesktop ? "부품별 구성을 선택하여 조립 PC 견적을 완성하세요." : "구매하실 장비의 모델과 단가를 입력하세요."}
+                {isDesktop ? "데스크톱은 부품 메뉴에서 담은 구성을 기준으로 요청합니다." : "구매하실 장비의 모델과 단가를 입력하세요."}
               </p>
             </div>
           </div>
@@ -1205,8 +1340,7 @@ function EquipmentScreen({
                 <option>데스크톱</option>
                 <option>모니터</option>
                 <option>태블릿</option>
-                <option>프린터</option>
-                <option>공유기/네트워크 장비</option>
+                <option>네트워크/NAS</option>
                 <option>기타 장비</option>
               </select>
             </EquipmentRow>
@@ -1214,58 +1348,26 @@ function EquipmentScreen({
             {isDesktop ? (
               <div className="bg-blue-50/30 p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-blue-900">🖥️ 본체 조립 사양</h4>
-                  <span className="text-xs font-bold text-blue-600">총 {totalPrice.toLocaleString()}원</span>
+                  <h4 className="text-sm font-bold text-blue-900">🖥️ 데스크톱 구성 안내</h4>
+                  <span className="text-xs font-bold text-blue-600">부품 합계 {basketTotal.toLocaleString()}원</span>
                 </div>
-                
-                <div className="mb-6">
-                  <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">프리셋 불러오기</p>
-                  <div className="flex flex-wrap gap-2">
-                    {equipmentPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => setConfig({ ...config, parts: preset.parts })}
-                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm"
-                      >
-                        {preset.name}
-                      </button>
-                    ))}
+                <div className="rounded-xl border border-blue-200 bg-white p-4 text-sm text-slate-600">
+                  CPU 같은 세부 부품 선택은 여기서 하지 않고, `부품 구매` 메뉴에서 담은 구성으로 데스크톱 요청이 생성됩니다.
+                </div>
+                {partsBasket.length === 0 ? (
+                  <div className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
+                    아직 담긴 부품이 없습니다. `부품 구매` 메뉴에서 먼저 필요한 부품을 선택해 주세요.
                   </div>
-                </div>
-
-                <div className="grid gap-6">
-                  {Object.keys(config.parts).map((category) => (
-                    <div key={category} className="grid gap-2 sm:grid-cols-[100px_1fr]">
-                      <span className="text-[11px] font-bold text-slate-500 uppercase">{category}</span>
-                      <div className="grid gap-2">
-                        <select
-                          value={config.parts[category] || ""}
-                          onChange={(e) => updateConfig(category, e.target.value)}
-                          className="field w-full border-blue-200 text-sm"
-                        >
-                          {equipmentParts
-                            .filter((p) => p.category === category)
-                            .map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.tier === "고성능" ? "🚀 " : p.tier === "업무용" ? "💼 " : ""}
-                                {p.name} (+{p.price.toLocaleString()}원)
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                ) : null}
               </div>
             ) : (
               <EquipmentRow label="모델명 및 단가">
                 <div className="grid gap-3 md:grid-cols-2">
-                   <input value={equipment.item === "노트북" ? (equipment.userName ? `${equipment.userName}님 노트북` : "신규 노트북") : equipment.item} className="field w-full" readOnly disabled />
-                   <div className="relative">
-                      <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full pr-10" placeholder="대당 단가 입력" />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
-                   </div>
+                  <input value={equipment.item === "노트북" ? (equipment.userName ? `${equipment.userName}님 노트북` : "신규 노트북") : equipment.item} className="field w-full" readOnly disabled />
+                  <div className="relative">
+                    <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full pr-10" placeholder="대당 단가 입력" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                  </div>
                 </div>
               </EquipmentRow>
             )}
@@ -1310,9 +1412,9 @@ function EquipmentScreen({
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-500 uppercase">
-                  {isDesktop ? "본체" : "본체/본품"} {basePrice.toLocaleString()}원
+                  {isDesktop ? "부품 합계" : "본품 단가"} {basePrice.toLocaleString()}원
                 </span>
-                {partsBasket.length > 0 && <span className="text-[10px] font-bold text-blue-600">+ 구성품 {basketTotal.toLocaleString()}원</span>}
+                {!isDesktop && partsBasket.length > 0 ? <span className="text-[10px] font-bold text-blue-600">+ 구성품 {basketTotal.toLocaleString()}원</span> : null}
               </div>
               <div className={`text-2xl font-black tracking-tighter ${(equipment.count >= 2 || basePrice >= 700000) ? "text-rose-600" : "text-blue-600"}`}>
                 <span className="mr-1 text-sm font-bold text-slate-400">총 견적</span>
@@ -1321,11 +1423,9 @@ function EquipmentScreen({
             </div>
             <button
               onClick={() => {
-                if (isDesktop) {
-                  setEquipment({ ...equipment, unitPrice: basePrice });
-                }
+                setEquipment({ ...equipment, unitPrice: basePrice });
                 createEquipment();
-                setPartsBasket([]);
+                if (isDesktop) setPartsBasket([]);
               }}
               className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
             >
@@ -1358,7 +1458,7 @@ function EquipmentScreen({
             <div className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-600 leading-relaxed">
               {total > 1500000 ? (
                 <p>현재 구성은 <strong>[고성능]</strong> 등급입니다. 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
-              ) : totalPrice > 750000 ? (
+              ) : basePrice > 750000 ? (
                 <p>현재 구성은 <strong>[표준]</strong> 등급입니다. 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
               ) : (
                 <p>현재 구성은 <strong>[기본]</strong> 등급입니다. 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
@@ -1373,21 +1473,82 @@ function EquipmentScreen({
 
 function EquipmentRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-3 bg-white md:grid-cols-[120px_1fr]">
-      <div className="bg-slate-50 px-5 py-4 text-sm font-bold text-slate-900">{label}</div>
+    <div className="grid gap-3 bg-white md:grid-cols-[170px_1fr]">
+      <div className="whitespace-nowrap bg-slate-50 px-5 py-4 text-sm font-bold text-slate-900">{label}</div>
       <div className="px-4 py-3">{children}</div>
     </div>
   );
 }
 
 function AsScreen({ symptom, setSymptom, diagnosis, createAsTicket }: { symptom: string; setSymptom: (value: string) => void; diagnosis: string; createAsTicket: () => void }) {
+  const faqCategories: FaqCategory[] = [
+    {
+      id: "display",
+      title: "자주 묻는 화면/모니터 문제",
+      desc: "모니터, 화면 출력, 빔프로젝터 관련 질문",
+      items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["모니터", "화면", "검은색", "빔", "프로젝터"].includes(keyword)))
+    },
+    {
+      id: "network",
+      title: "자주 묻는 인터넷 문제",
+      desc: "와이파이, 인터넷, 네트워크 연결 질문",
+      items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["인터넷", "네트워크", "와이파이"].includes(keyword)))
+    },
+    {
+      id: "printer",
+      title: "자주 묻는 프린터 문제",
+      desc: "프린터, 인쇄, 복사기 관련 질문",
+      items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["프린터", "인쇄", "복사기"].includes(keyword)))
+    },
+    {
+      id: "slow",
+      title: "자주 묻는 속도 문제",
+      desc: "느림, 버벅임, 성능 저하 관련 질문",
+      items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["느려요", "버벅임", "렉"].includes(keyword)))
+    }
+  ];
+
   return (
-    <Screen title="A/S" desc="증상 진단 후 내부 처리 또는 업체 접수로 라우팅합니다.">
-      <FormPanel icon={Stethoscope} title="증상 진단">
-        <textarea value={symptom} onChange={(event) => setSymptom(event.target.value)} className="min-h-32 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" aria-label="증상" />
-        <p className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">{diagnosis}</p>
-        <ActionButton onClick={createAsTicket} label="A/S 요청 생성" />
-      </FormPanel>
+    <Screen title="A/S" desc="자주 묻는 질문을 먼저 확인하고, 해결되지 않으면 바로 요청 큐로 티켓을 생성합니다.">
+      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {faqCategories.map((category) => (
+              <article key={category.id} className="surface-strong rounded-2xl border border-slate-100 p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                    <Stethoscope className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900">{category.title}</h3>
+                    <p className="text-xs text-slate-500">{category.desc}</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {category.items.map((item) => (
+                    <button
+                      key={item.symptom}
+                      onClick={() => setSymptom(item.symptom)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left hover:border-blue-200 hover:bg-blue-50/40"
+                    >
+                      <p className="text-sm font-bold text-slate-800">{item.symptom}</p>
+                      <p className="mt-1 text-xs text-slate-500">{item.solution[0]}</p>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className="space-y-5">
+          <FormPanel icon={Stethoscope} title="직접 문의 / 티켓 생성">
+            <textarea value={symptom} onChange={(event) => setSymptom(event.target.value)} className="min-h-32 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" aria-label="증상" placeholder="예: 3층 강의실 모니터 화면이 안 나와요" />
+            <p className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">{diagnosis}</p>
+            <ActionButton onClick={createAsTicket} label="문의하고 요청 큐에 티켓 생성" />
+          </FormPanel>
+        </aside>
+      </section>
     </Screen>
   );
 }
@@ -1396,6 +1557,11 @@ function AsScreen({ symptom, setSymptom, diagnosis, createAsTicket }: { symptom:
 function NasScreen({
   nasUser,
   setNasUser,
+  nasResource,
+  setNasResource,
+  nasPermissionLevel,
+  setNasPermissionLevel,
+  nasPermissionRows,
   createNasRequest,
   webdav,
   webdavLoading,
@@ -1415,7 +1581,12 @@ function NasScreen({
 }: {
   nasUser: string;
   setNasUser: (value: string) => void;
-  createNasRequest: () => void;
+  nasResource: string;
+  setNasResource: (value: string) => void;
+  nasPermissionLevel: "read" | "write" | "admin";
+  setNasPermissionLevel: (value: "read" | "write" | "admin") => void;
+  nasPermissionRows: NasPermissionRecord[];
+  createNasRequest: () => void | Promise<void>;
   webdav: WebDavResult | null;
   webdavLoading: boolean;
   checkWebDav: () => void;
@@ -1489,24 +1660,6 @@ function NasScreen({
             </div>
           </div>
         )}
-
-        <div className="grid gap-4 md:grid-cols-3">
-          {nasMetrics.map((metric) => (
-            <article key={metric.label} className="surface-strong rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">{metric.label}</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
-                  <HardDrive className="h-4 w-4 text-slate-600" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="mt-4 text-3xl font-black">{metric.value}</div>
-              <p className="mt-1 text-xs font-semibold text-gray-400">{metric.detail}</p>
-              <div className="mt-4 progress-track bg-slate-100">
-                <div className={`h-full rounded-full transition-all duration-500 ${metric.health === "주의" ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]" : metric.health === "위험" ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : "bg-emerald-500"}`} style={{ width: metric.value.includes("%") ? metric.value : "62%" }} />
-              </div>
-            </article>
-          ))}
-        </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-6">
@@ -1607,8 +1760,32 @@ function NasScreen({
             <FormPanel icon={ShieldCheck} title="신규 사용자 권한 발급">
               <p className="text-xs text-slate-500 mb-3 leading-relaxed">특정 이메일 계정에 NAS 접속 권한 및 가이드를 자동으로 전송합니다.</p>
               <input value={nasUser} onChange={(event) => setNasUser(event.target.value)} className="field mb-1" placeholder="직원 이메일: email@academy.local" />
+              <input value={nasResource} onChange={(event) => setNasResource(event.target.value)} className="field mb-1" placeholder="리소스명: 공용 NAS / 교강사실 공유폴더" />
+              <select value={nasPermissionLevel} onChange={(event) => setNasPermissionLevel(event.target.value as "read" | "write" | "admin")} className="field mb-1" aria-label="권한 수준">
+                <option value="read">읽기</option>
+                <option value="write">읽기/쓰기</option>
+                <option value="admin">관리자</option>
+              </select>
               <ActionButton onClick={createNasRequest} label="권한 발급용 티켓 생성" />
             </FormPanel>
+            <section className="surface-strong rounded-lg p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-bold">최근 권한 요청</h3>
+                <span className="text-xs text-slate-400">{nasPermissionRows.length}건</span>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {nasPermissionRows.length ? (
+                  nasPermissionRows.slice(0, 4).map((row) => (
+                    <div key={row.id} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs">
+                      <p className="font-bold text-slate-800">{row.user_email}</p>
+                      <p className="mt-1 text-slate-500">{row.resource_name} · {row.permission_level} · {row.status}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">권한 요청 이력이 아직 없습니다.</p>
+                )}
+              </div>
+            </section>
           </aside>
         </div>
       </section>
@@ -1648,23 +1825,262 @@ function IconButton({ label, disabled, onClick, icon: Icon, tone }: { label: str
 }
 
 function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void }) {
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+
+  const earliestDate = useMemo(() => getEarliestSelectableDate(form), [form]);
+  const earliestIso = useMemo(() => earliestDate.toISOString().slice(0, 10), [earliestDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/holidays", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return { holidays: [] as string[] };
+        return (await response.json()) as { holidays: string[] };
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setHolidayDates(new Set(data.holidays));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHolidayDates(new Set());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!form.neededDate || form.neededDate < earliestIso) {
+      setForm({ ...form, neededDate: earliestIso });
+    }
+  }, [earliestIso, form, setForm]);
+
+  const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+  const gridStart = new Date(monthStart);
+  gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+
+  const calendarDays = Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(gridStart);
+    day.setDate(gridStart.getDate() + index);
+    const iso = day.toISOString().slice(0, 10);
+    const disabled = isWeekend(day) || holidayDates.has(iso) || day < earliestDate;
+    const outside = day.getMonth() !== calendarMonth.getMonth();
+    const selected = form.neededDate === iso;
+    return { day, iso, disabled, outside, selected };
+  });
+
+  const leadMessage =
+    form.priority === "긴급"
+      ? "긴급 건만 오늘 선택 가능하며, 주말은 선택할 수 없습니다."
+      : form.module === "전산 장비" && form.requestItem === "데스크톱 본체"
+        ? "데스크톱 본체는 최소 영업일 5일 이후부터 선택 가능합니다."
+        : form.module === "전산 장비" && form.requestItem === "모니터"
+          ? "모니터는 최소 영업일 3일 이후부터 선택 가능합니다."
+          : form.module === "전산 장비" && (form.requestItem === "노트북" || form.requestItem === "태블릿")
+          ? "노트북/태블릿은 최소 영업일 4일 이후부터 선택 가능합니다."
+            : "네트워크/NAS 및 기타 장비는 최소 영업일 7일 이후부터 선택 가능합니다.";
+  const priorityTone =
+    form.priority === "긴급"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : form.priority === "높음"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : form.priority === "보통"
+          ? "border-blue-200 bg-blue-50 text-blue-700"
+          : "border-slate-200 bg-slate-50 text-slate-600";
+
   return (
-    <section>
-      <div className="grid gap-3">
-        <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value })} className="field" aria-label="모듈">
-          <option>전산 장비</option><option>A/S</option><option>부품 구매</option><option>NAS</option>
-        </select>
-        <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="field" placeholder="요청 제목" />
-        <div className="grid grid-cols-2 gap-2">
-          <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className="field" placeholder="요청 부서" />
-          <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as WorkPriority })} className="field" aria-label="우선순위">
-            <option>낮음</option><option>보통</option><option>높음</option><option>긴급</option>
-          </select>
+    <section className="grid gap-6">
+      <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-slate-50 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Internal Request Form</p>
+            <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">경영지원 요청서</h3>
+            <p className="mt-2 text-sm text-slate-500">운영팀 검토와 승인 라우팅에 필요한 정보를 한 번에 정리하는 접수 문서입니다.</p>
+          </div>
+          <div className={`rounded-2xl border px-4 py-3 text-center shadow-sm ${priorityTone}`}>
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Processing</p>
+            <p className="mt-1 text-sm font-black">{form.priority}</p>
+            <p className="text-xs opacity-80">{form.neededDate || "처리일 미정"}</p>
+          </div>
         </div>
-        <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="field" placeholder="예산 또는 수량" />
-        <input value={form.vendor} onChange={(event) => setForm({ ...form, vendor: event.target.value })} className="field" placeholder="업체" />
-        <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-20 rounded-lg border border-gray-200 bg-white p-3 text-sm outline-none focus:border-blue-500" placeholder="상세 내용" />
-        <ActionButton onClick={createRequest} label="접수" />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-5">
+          <section className="rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h4 className="text-sm font-black text-slate-900">기본 신청 정보</h4>
+              <p className="mt-1 text-xs text-slate-500">모듈, 요청 제목, 신청 부서와 우선순위를 먼저 기록합니다.</p>
+            </div>
+            <div className="grid gap-4 p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold text-slate-500">요청 모듈</span>
+                  <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value, requestItem: event.target.value === "전산 장비" ? form.requestItem : event.target.value === "NAS" ? "네트워크/NAS" : "기타 장비" })} className="field" aria-label="모듈">
+                    <option>전산 장비</option>
+                    <option>A/S</option>
+                    <option>부품 구매</option>
+                    <option>NAS</option>
+                  </select>
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold text-slate-500">요청 품목</span>
+                  <select
+                    value={form.requestItem}
+                    onChange={(event) => setForm({ ...form, requestItem: event.target.value })}
+                    className="field"
+                    aria-label="요청 품목"
+                    disabled={form.module !== "전산 장비"}
+                  >
+                    {requestItemOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold text-slate-500">우선순위</span>
+                  <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as WorkPriority })} className="field" aria-label="우선순위">
+                    <option>낮음</option>
+                    <option>보통</option>
+                    <option>높음</option>
+                    <option>긴급</option>
+                  </select>
+                </label>
+              </div>
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">요청 제목</span>
+                <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="field" placeholder="예: 범어점 상담실 모니터 2대 신규 구매 요청" />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h4 className="text-sm font-black text-slate-900">신청 부서 및 일정</h4>
+              <p className="mt-1 text-xs text-slate-500">누가 요청했고 언제까지 필요한지 남겨두면 검토가 훨씬 빨라집니다.</p>
+            </div>
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">요청 부서/지점</span>
+                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className="field" placeholder="손샘학원(본사)" />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">담당 연락처</span>
+                <input value={form.requesterContact} onChange={(event) => setForm({ ...form, requesterContact: event.target.value })} className="field" placeholder="예: 내선 203 / 010-0000-0000" />
+              </label>
+              <label className="grid gap-2 md:col-span-2">
+                <span className="text-xs font-bold text-slate-500">희망 처리일</span>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <CalendarDays className="h-4 w-4 text-blue-600" aria-hidden="true" />
+                      <div className="min-w-0">
+                        <p className="whitespace-nowrap text-sm font-black text-slate-900">{formatDateLabel(form.neededDate)}</p>
+                        <p className="whitespace-nowrap text-xs text-slate-500">{leadMessage}</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="mr-2 whitespace-nowrap text-sm font-black text-slate-800">{new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long" }).format(calendarMonth)}</div>
+                      <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">이전</button>
+                      <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">다음</button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarOpen((current) => !current)}
+                    className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100"
+                  >
+                    <div className="min-w-0">
+                      <p className="whitespace-nowrap text-sm font-black text-slate-900">{formatDateLabel(form.neededDate)}</p>
+                      <p className="whitespace-nowrap text-xs text-slate-500">주말과 공휴일은 자동으로 제외됩니다.</p>
+                    </div>
+                    <span className="text-xs font-bold text-blue-600">{calendarOpen ? "닫기" : "달력 열기"}</span>
+                  </button>
+                  {calendarOpen ? (
+                    <>
+                      <div className="mb-2 mt-4 grid grid-cols-7 gap-2 text-center text-[11px] font-bold text-slate-400">
+                        {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-2">
+                        {calendarDays.map(({ day, iso, disabled, outside, selected }) => (
+                          <button
+                            key={iso}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              setForm({ ...form, neededDate: iso });
+                              setCalendarOpen(false);
+                            }}
+                            className={`h-11 rounded-xl text-sm font-bold transition ${
+                              selected
+                                ? "bg-blue-600 text-white shadow-lg shadow-blue-100"
+                                : disabled
+                                  ? "cursor-not-allowed bg-slate-50 text-slate-300"
+                                  : outside
+                                    ? "bg-white text-slate-300 hover:bg-slate-50"
+                                    : "bg-white text-slate-700 hover:border hover:border-blue-200 hover:bg-blue-50"
+                            }`}
+                          >
+                            {day.getDate()}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h4 className="text-sm font-black text-slate-900">예산 및 요청 상세</h4>
+              <p className="mt-1 text-xs text-slate-500">수량, 예산, 검토 대상 업체와 실제 필요한 내용을 상세히 적어주세요.</p>
+            </div>
+            <div className="grid gap-4 p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold text-slate-500">예산 또는 수량</span>
+                  <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="field" placeholder="예: 2대 / 1,200,000원" />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold text-slate-500">업체</span>
+                  <input value={form.vendor} onChange={(event) => setForm({ ...form, vendor: event.target.value })} className="field" placeholder="예: 다나와 / 협력업체명 / 미정" />
+                </label>
+              </div>
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">상세 내용</span>
+                <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-40 rounded-xl border border-gray-200 bg-white p-4 text-sm outline-none focus:border-blue-500" placeholder="요청 배경, 설치 위치, 사용 목적, 참고 사항, 승인에 필요한 내용을 자세히 적어주세요." />
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <aside className="grid gap-5 self-start">
+          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <h4 className="text-sm font-black text-slate-900">접수 전 확인</h4>
+            <div className="mt-4 grid gap-3 text-xs leading-relaxed text-slate-600">
+              <p>• 제목은 한눈에 식별되도록 `지점 + 품목 + 목적` 순서로 적는 것이 좋습니다.</p>
+              <p>• 예산 또는 수량이 정확할수록 승인과 발주가 빨라집니다.</p>
+              <p>• 긴급 건은 상세 내용에 운영 영향과 처리 사유를 꼭 적어주세요.</p>
+            </div>
+          </section>
+          <button onClick={createRequest} className="focus-ring inline-flex h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-xl shadow-blue-100 hover:bg-blue-700">
+            요청서 접수
+          </button>
+        </aside>
       </div>
     </section>
   );
@@ -1853,7 +2269,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 sm:p-4 backdrop-blur-sm">
-      <div className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl">
+      <div className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-5xl sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 shrink-0">
           <h3 className="text-lg font-black tracking-tight text-slate-900">{title}</h3>
           <button onClick={onClose} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="닫기">
@@ -1912,7 +2328,7 @@ function AiHarness() {
 }
 
 
-function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet: any; setTablet: (v: any) => void; createTabletRequest: () => void; role: UserRole }) {
+function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet: TabletForm; setTablet: (v: TabletForm) => void; createTabletRequest: () => void; role: UserRole }) {
   const [tabletModels, setTabletModels] = useState(["Galaxy Tab S9", "Galaxy Tab S9 FE", "Galaxy Tab S9 Ultra", "Galaxy Tab A9+"]);
   const [newModel, setNewModel] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -1947,6 +2363,20 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
              </div>
           </div>
           <div className="divide-y divide-slate-200">
+            <EquipmentRow label="처리 유형">
+               <div className="grid grid-cols-3 gap-2">
+                  {(["신규", "연장", "반납"] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setTablet({ ...tablet, requestType: type, duration: type === "신규" ? "36개월" : tablet.duration })}
+                      className={`rounded-lg border px-3 py-2 text-xs font-bold ${tablet.requestType === type ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-500"}`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+               </div>
+            </EquipmentRow>
             <EquipmentRow label="학원/지점">
                <input value={tablet.academy} onChange={(e) => setTablet({...tablet, academy: e.target.value})} className="field w-full" placeholder="손샘학원(본사)" />
             </EquipmentRow>
@@ -1959,11 +2389,18 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
                <input type="number" min={1} value={tablet.count} onChange={(e) => setTablet({...tablet, count: Number(e.target.value)})} className="field w-full" />
             </EquipmentRow>
             <EquipmentRow label="렌탈 기간">
-               <div className="field w-full bg-slate-50 font-bold text-slate-500">36개월 고정</div>
+               <div className="field w-full bg-slate-50 font-bold text-slate-500">
+                 {tablet.requestType === "신규" ? "36개월 고정" : tablet.requestType === "연장" ? "추가 연장 협의" : "반납 회수 일정"}
+               </div>
             </EquipmentRow>
             <EquipmentRow label="사용 용도">
-               <input value={tablet.purpose} onChange={(e) => setTablet({...tablet, purpose: e.target.value})} className="field w-full" placeholder="교재 열람, 테스트용 등" />
+               <input value={tablet.purpose} onChange={(e) => setTablet({...tablet, purpose: e.target.value})} className="field w-full" placeholder="예: 교재 열람, 테스트용, 상담실 안내용" />
             </EquipmentRow>
+            {tablet.requestType !== "신규" ? (
+              <EquipmentRow label="자산 태그">
+                 <input value={tablet.assetTag} onChange={(e) => setTablet({ ...tablet, assetTag: e.target.value })} className="field w-full" placeholder="예: TAB-2024-018" />
+              </EquipmentRow>
+            ) : null}
             <EquipmentRow label="희망 수령일">
                <input type="date" value={tablet.neededDate} onChange={(e) => setTablet({...tablet, neededDate: e.target.value})} className="field w-full" />
             </EquipmentRow>
@@ -1980,11 +2417,11 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
                 </div>
              </div>
              <button onClick={() => {
-               setTablet({...tablet, duration: "36개월"});
+               setTablet({...tablet, duration: tablet.requestType === "신규" ? "36개월" : tablet.duration});
                createTabletRequest();
              }} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 text-sm font-bold text-white hover:bg-amber-700 shadow-lg shadow-amber-100 transition-all">
                 <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-                렌탈 요청 생성
+                {tablet.requestType === "신규" ? "렌탈 요청 생성" : tablet.requestType === "연장" ? "연장 요청 생성" : "반납 요청 생성"}
              </button>
           </div>
 
@@ -2042,22 +2479,14 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
   );
 }
 
-function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, partsBasket, setPartsBasket }: { addRequest: (r: any) => void; setActiveMenu: (m: MenuKey) => void; setEquipment: (v: any) => void; equipment: any; partsBasket: any[]; setPartsBasket: (v: any[]) => void }) {
+function PartsScreen({ addRequest, setActiveMenu, partsBasket, setPartsBasket }: { addRequest: (r: Omit<WorkItem, "id">) => void; setActiveMenu: (m: MenuKey) => void; partsBasket: BasketItem[]; setPartsBasket: (v: BasketItem[]) => void }) {
   const [partQuery, setPartQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [isUpdating, setIsUpdating] = useState(false);
-  
-  const categories = [
-    { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
-    { id: "Input", name: "주변기기", icon: Headphones, items: ["Keyboard", "Mouse"] },
-    { id: "Cable", name: "케이블/허브", icon: Search, items: ["Cables"] },
-    { id: "Supply", name: "사무 소모품", icon: ClipboardList, items: ["Consumables"] }
-  ];
 
   const filteredItems = useMemo(() => {
     let result = equipmentParts;
     if (selectedCategory) {
-      const catObj = categories.find(c => c.id === selectedCategory);
+      const catObj = partsCategories.find(c => c.id === selectedCategory);
       if (catObj) {
         result = result.filter(p => catObj.items.includes(p.category));
       }
@@ -2071,7 +2500,7 @@ function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, parts
     return result;
   }, [selectedCategory, partQuery]);
 
-  const addToBasket = (part: any) => {
+  const addToBasket = (part: Omit<BasketItem, "id">) => {
     setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
   };
 
@@ -2080,12 +2509,11 @@ function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, parts
   };
 
   const goToEquipment = () => {
-    const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
     setActiveMenu("equipment");
   };
 
   const openDanawa = (query: string) => {
-    window.open(`https://search.danawa.com/mobile/dsearch.php?keyword=${encodeURIComponent(query)}`, "_blank");
+    window.open(`https://search.danawa.com/dsearch.php?query=${encodeURIComponent(query)}`, "_blank");
   };
 
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
@@ -2096,7 +2524,7 @@ function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, parts
         <div className="space-y-6">
           {/* Category Cards */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {categories.map((cat) => {
+            {partsCategories.map((cat) => {
               const Icon = cat.icon;
               const active = selectedCategory === cat.id;
               return (

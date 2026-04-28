@@ -57,7 +57,7 @@ export type NasMetric = {
 
 export type EquipmentPart = {
   id: string;
-  category: "CPU" | "RAM" | "SSD" | "Mainboard" | "Power" | "Case" | "Graphic Card" | "Monitor" | "Keyboard" | "Mouse" | "Etc";
+  category: "CPU" | "RAM" | "SSD" | "Mainboard" | "Power" | "Case" | "Graphic Card" | "Monitor" | "Keyboard" | "Mouse" | "Cables" | "Consumables" | "Etc";
   name: string;
   price: number;
   description: string;

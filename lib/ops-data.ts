@@ -8,7 +8,7 @@ import {
   Search,
   ShieldCheck
 } from "lucide-react";
-import type { EquipmentPart, EquipmentPreset, ModuleSummary, NasMetric, WorkItem } from "@/types/ops";
+import type { EquipmentPart, EquipmentPreset, ModuleSummary, WorkItem } from "@/types/ops";
 
 export const modules: ModuleSummary[] = [
   {
@@ -87,27 +87,6 @@ export const workItems: WorkItem[] = [
   }
 ];
 
-export const nasMetrics: NasMetric[] = [
-  {
-    label: "공용 NAS 용량",
-    value: "72%",
-    detail: "2.1TB / 2.9TB 사용",
-    health: "주의"
-  },
-  {
-    label: "활성 사용자",
-    value: "128",
-    detail: "최근 24시간 접속 46명",
-    health: "정상"
-  },
-  {
-    label: "권한 변경",
-    value: "7",
-    detail: "승인 대기 2건",
-    health: "정상"
-  }
-];
-
 export const aiHarnessSteps = [
   { label: "Router", icon: Bot, text: "요청을 코드, 문서, DB, 보안, UI 작업으로 분류" },
   { label: "Builder", icon: Database, text: "Frontend, Backend, SQL, Infra 산출물 생성" },
@@ -117,15 +96,15 @@ export const aiHarnessSteps = [
 
 export const equipmentParts: EquipmentPart[] = [
   // CPU
-  { id: "cpu-2", category: "CPU", name: "Intel Core i5 (13th Gen)", price: 280000, description: "표준 업무용", performanceNote: "멀티태스킹과 엑셀 작업이 원활합니다.", tier: "업무용" },
-  { id: "cpu-amd-2", category: "CPU", name: "AMD Ryzen 5 (7000 Series)", price: 270000, description: "표준 업무용 (AMD)", performanceNote: "멀티코어 성능이 뛰어나 여러 프로그램을 띄우기 좋습니다.", tier: "업무용" },
-  { id: "cpu-3", category: "CPU", name: "Intel Core i7 (14th Gen)", price: 480000, description: "고성능 전문가용", performanceNote: "무거운 디자인, 영상 편집 프로그램도 거뜬합니다.", tier: "고성능" },
-  { id: "cpu-amd-3", category: "CPU", name: "AMD Ryzen 7 (8000 Series)", price: 490000, description: "고성능 전문가용 (AMD)", performanceNote: "강력한 연산 성능으로 그래픽 작업 속도를 높여줍니다.", tier: "고성능" },
+  { id: "cpu-amd-1", category: "CPU", name: "AMD Ryzen 5 5600G", price: 165000, description: "내장그래픽 포함 업무용", performanceNote: "외장 그래픽 없이도 문서 작업, 웹 업무, 영상 재생을 안정적으로 처리합니다.", tier: "기본" },
+  { id: "cpu-2", category: "CPU", name: "AMD Ryzen 5 5600G", price: 165000, description: "표준 업무용", performanceNote: "내장 그래픽 포함이라 일반 학원 업무용 PC를 합리적으로 구성하기 좋습니다.", tier: "업무용" },
+  { id: "cpu-amd-2g", category: "CPU", name: "AMD Ryzen 7 5700G", price: 245000, description: "상위 내장그래픽 포함 업무용", performanceNote: "강의실 PC나 데스크 업무에서 외장 그래픽 없이도 여유 있는 성능을 제공합니다.", tier: "업무용" },
+  { id: "cpu-3", category: "CPU", name: "AMD Ryzen 7 5700G", price: 245000, description: "고성능 업무용", performanceNote: "AM4 기반에서도 여유 있는 멀티태스킹과 내장 그래픽 성능을 제공합니다.", tier: "고성능" },
   
   // RAM
-  { id: "ram-1", category: "RAM", name: "8GB DDR5", price: 45000, description: "최소 사양", performanceNote: "기본적인 업무 수행이 가능합니다.", tier: "기본" },
-  { id: "ram-2", category: "RAM", name: "16GB DDR5", price: 85000, description: "표준 사양", performanceNote: "인터넷 창을 여러 개 띄워도 쾌적합니다.", tier: "업무용" },
-  { id: "ram-3", category: "RAM", name: "32GB DDR5", price: 160000, description: "전문가용", performanceNote: "대용량 데이터와 그래픽 작업을 동시에 수행합니다.", tier: "고성능" },
+  { id: "ram-1", category: "RAM", name: "8GB DDR4", price: 35000, description: "최소 사양", performanceNote: "기본적인 업무 수행이 가능합니다.", tier: "기본" },
+  { id: "ram-2", category: "RAM", name: "16GB DDR4", price: 65000, description: "표준 사양", performanceNote: "인터넷 창을 여러 개 띄워도 쾌적합니다.", tier: "업무용" },
+  { id: "ram-3", category: "RAM", name: "32GB DDR4", price: 120000, description: "전문가용", performanceNote: "대용량 데이터와 그래픽 작업을 동시에 수행합니다.", tier: "고성능" },
 
   // SSD
   { id: "ssd-1", category: "SSD", name: "256GB NVMe", price: 50000, description: "저용량", performanceNote: "시스템 부팅과 기본 프로그램 운용에 적합합니다.", tier: "기본" },
@@ -133,8 +112,8 @@ export const equipmentParts: EquipmentPart[] = [
   { id: "ssd-3", category: "SSD", name: "1TB NVMe", price: 150000, description: "대용량", performanceNote: "영상과 사진등 대용량 파일을 넉넉하게 보관합니다.", tier: "고성능" },
 
   // Mainboard
-  { id: "mb-1", category: "Mainboard", name: "B760M 보급형", price: 120000, description: "표준 안정성", performanceNote: "안정적인 시스템 구동을 지원합니다.", tier: "업무용" },
-  { id: "mb-2", category: "Mainboard", name: "Z790 고급형", price: 350000, description: "고성능 안정성", performanceNote: "고전력 부품들과 완벽한 호환성을 보장합니다.", tier: "고성능" },
+  { id: "mb-1", category: "Mainboard", name: "A520M 보급형", price: 85000, description: "AM4 기본 안정성", performanceNote: "5600G 기반의 실속형 업무용 PC에 잘 맞는 보드입니다.", tier: "업무용" },
+  { id: "mb-2", category: "Mainboard", name: "B550M 고급형", price: 145000, description: "AM4 확장 안정성", performanceNote: "5700G나 확장성 있는 업무용 구성에 균형이 좋습니다.", tier: "고성능" },
 
   // Power
   { id: "pwr-1", category: "Power", name: "500W 정격", price: 45000, description: "표준 전력", performanceNote: "일반 사무용 PC에 충분한 전력을 공급합니다.", tier: "업무용" },

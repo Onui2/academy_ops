@@ -16,7 +16,8 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
 import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
 import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
 
@@ -80,6 +81,33 @@ const samples = [
   "모니터가 갑자기 안 나와요"
 ];
 
+const asFaqCategories = [
+  {
+    id: "display",
+    title: "자주 묻는 화면/모니터 문제",
+    desc: "모니터, 화면 출력, 빔프로젝터 관련 질문",
+    items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["모니터", "화면", "검은색", "빔", "프로젝터"].includes(keyword)))
+  },
+  {
+    id: "network",
+    title: "자주 묻는 인터넷 문제",
+    desc: "와이파이, 인터넷, 네트워크 연결 질문",
+    items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["인터넷", "네트워크", "와이파이"].includes(keyword)))
+  },
+  {
+    id: "printer",
+    title: "자주 묻는 프린터 문제",
+    desc: "프린터, 인쇄, 복사기 관련 질문",
+    items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["프린터", "인쇄", "복사기"].includes(keyword)))
+  },
+  {
+    id: "slow",
+    title: "자주 묻는 속도 문제",
+    desc: "느림, 버벅임, 성능 저하 관련 질문",
+    items: diagnosisPatterns.filter((item) => item.keywords.some((keyword) => ["느려요", "버벅임", "렉"].includes(keyword)))
+  }
+] as const;
+
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
     category: "equipment",
@@ -116,7 +144,7 @@ export function UserPortal() {
     }
   }, [supabase]);
 
-  const [dbFaqs, setDbFaqs] = useState<{ id: string; keyword: string; category: string; answer: string }[]>([]);
+  const [dbFaqs, setDbFaqs] = useState<{ id: string; keyword: string; category: string; answer: string; escalation_required: boolean }[]>([]);
 
   useEffect(() => {
     if (supabase) {
@@ -149,16 +177,38 @@ export function UserPortal() {
 
   useEffect(() => {
     if (draft.category === "as" && symptomQuery.length > 1) {
-      // Mapping question to keyword for UI compatibility
-      const match = dbFaqs.find(f => symptomQuery.toLowerCase().includes((f as any).question?.toLowerCase() || ""));
+      const normalizedSymptom = symptomQuery.toLowerCase().replace(/\s/g, "");
+      const match = dbFaqs.find((faq) => normalizedSymptom.includes(faq.keyword.toLowerCase().replace(/\s/g, "")));
       if (match) {
         setDiagnosis({
-          diagnosis: match.category === "영상장비" ? "영상 장비 장애" : match.category === "네트워크" ? "네트워크 장애" : "시스템 오류",
-          solution: match.answer.split(", "),
-          original: { ...match, keyword: (match as any).question } as any
+          diagnosis:
+            match.category === "device"
+              ? "영상 장비 장애"
+              : match.category === "network"
+                ? "네트워크 장애"
+                : match.category === "nas"
+                  ? "NAS 접속 이슈"
+                  : "시스템 오류",
+          solution: match.answer.split(/[,.]\s+/).filter(Boolean),
+          original: match
         });
       } else {
-        setDiagnosis(null);
+        const fallback = getDiagnosis(symptomQuery);
+        setDiagnosis(
+          fallback
+            ? {
+                diagnosis: fallback.diagnosis,
+                solution: fallback.solution,
+                original: {
+                  id: `fallback-${fallback.symptom}`,
+                  keyword: fallback.symptom,
+                  category: fallback.module,
+                  answer: fallback.solution.join(", "),
+                  escalation_required: true
+                }
+              }
+            : null
+        );
       }
     } else {
       setDiagnosis(null);
@@ -218,7 +268,8 @@ export function UserPortal() {
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
-    if (draft.category === "equipment") return "필요한 장비명, 수량, 사용 장소, 희망 일정을 적어주세요.";
+    if (draft.category === "equipment") return "부품을 직접 고르고 조립 PC 요청을 바로 접수할 수 있어요.";
+    if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
 
@@ -246,7 +297,8 @@ export function UserPortal() {
 
     const description = [
       ...configLines,
-      draft.detail,
+      draft.category === "tablet" ? `처리 유형: ${draft.title.includes("연장") ? "연장" : draft.title.includes("반납") ? "반납" : "신규"}\n${draft.detail}` : draft.detail,
+      draft.category === "nas" ? "안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다." : "",
       files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
     ].filter(Boolean).join("\n");
 
@@ -261,6 +313,7 @@ export function UserPortal() {
           priority,
           description,
           urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+          urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
           audit: `${existing.id} 보류 후 재접수됨`
         };
 
@@ -286,12 +339,21 @@ export function UserPortal() {
         source: "user_portal",
         approvedByAcademyAdmin: false,
         urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+        urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
         evidenceFiles: files.map((file) => file.name)
       };
 
       if (supabase && user) {
         const { createRequest } = await import("@/lib/ops-repository");
         await createRequest(supabase, user, item);
+        if (draft.category === "nas") {
+          await createNasPermissionRequest(supabase, {
+            user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? user.email ?? "unknown@academy.local",
+            resource_name: draft.title || "공용 NAS",
+            permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
+            requested_by: user.id
+          });
+        }
       } else {
         pushToAdminQueue(item);
       }
@@ -309,7 +371,7 @@ export function UserPortal() {
   return (
     <main className="min-h-screen bg-slate-50">
       <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
+        <div className="mx-auto flex w-full max-w-[1560px] items-center gap-3 px-4 py-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
             <Megaphone className="h-5 w-5" aria-hidden="true" />
           </div>
@@ -323,7 +385,7 @@ export function UserPortal() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mx-auto grid w-full max-w-[1560px] gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_260px]">
         <section className="grid gap-6">
           <div className="rounded-lg border border-gray-200 bg-white p-5">
             <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
@@ -362,63 +424,101 @@ export function UserPortal() {
 
             <div className="mt-5 grid gap-3">
               {draft.category === "as" && asStep === "searching" ? (
-                <div className="mt-2 space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      value={symptomQuery} 
-                      onChange={(e) => setSymptomQuery(e.target.value)}
-                      className="field pl-10" 
-                      placeholder="증상을 입력하세요 (예: 모니터가 안 나와요, 인터넷 끊김)" 
-                    />
+                <div className="mt-2 space-y-5">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {asFaqCategories.map((category) => (
+                      <article key={category.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-600">
+                            <Wrench className="h-5 w-5" aria-hidden="true" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-900">{category.title}</h3>
+                            <p className="text-xs text-slate-500">{category.desc}</p>
+                          </div>
+                        </div>
+                        <div className="mt-4 grid gap-3">
+                          {category.items.map((item) => (
+                            <button
+                              key={item.symptom}
+                              onClick={() => setSymptomQuery(item.symptom)}
+                              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-blue-200 hover:bg-blue-50/40"
+                            >
+                              <p className="text-sm font-bold text-slate-800">{item.symptom}</p>
+                              <p className="mt-1 text-xs text-slate-500">{item.solution[0]}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                  
-                  {diagnosis ? (
-                    <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-5 shadow-sm animate-in fade-in slide-in-from-top-2">
-                      <div className="flex items-center gap-2 text-blue-800 font-bold mb-3">
-                        <Bot className="h-5 w-5" />
-                        <span>AI 자가 진단 결과: {diagnosis.diagnosis}</span>
+
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={symptomQuery}
+                        onChange={(e) => setSymptomQuery(e.target.value)}
+                        className="field pl-10"
+                        placeholder="예: 모니터가 안 나와요, 인터넷이 끊겨요"
+                      />
+                    </div>
+
+                    {diagnosis ? (
+                      <div className="mt-4 rounded-xl border border-blue-200 bg-white p-5 shadow-sm">
+                        <div className="mb-3 flex items-center gap-2 font-bold text-blue-800">
+                          <Bot className="h-5 w-5" />
+                          <span>자가 진단 결과: {diagnosis.diagnosis}</span>
+                        </div>
+                        <ul className="space-y-2">
+                          {diagnosis.solution.map((step, i) => (
+                            <li key={i} className="flex gap-2 text-sm text-slate-600">
+                              <span className="font-bold text-blue-500">{i + 1}.</span>
+                              {step}
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="mt-5 flex gap-2">
+                          <button
+                            onClick={() => {
+                              setSymptomQuery("");
+                              setDiagnosis(null);
+                            }}
+                            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold hover:bg-slate-50"
+                          >
+                            해결되었습니다
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAsStep("form");
+                              setDraft({ ...draft, title: symptomQuery, detail: "FAQ/자가 진단을 시도했지만 해결되지 않았습니다." });
+                            }}
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
+                          >
+                            해결 안 됨, 티켓 생성
+                          </button>
+                        </div>
                       </div>
-                      <ul className="space-y-2">
-                        {diagnosis.solution.map((step: string, i: number) => (
-                          <li key={i} className="flex gap-2 text-sm text-slate-600">
-                            <span className="font-bold text-blue-500">{i + 1}.</span>
-                            {step}
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-5 flex gap-2">
-                        <button 
+                    ) : symptomQuery.length > 1 ? (
+                      <div className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
+                        매칭되는 자가 해결 가이드가 없습니다.
+                        <button
                           onClick={() => {
                             setAsStep("form");
-                            setDraft({ ...draft, title: symptomQuery, detail: "자가 진단 시도했으나 해결되지 않음" });
+                            setDraft({ ...draft, title: symptomQuery, detail: "FAQ 검색 결과 없음. 직접 점검이 필요합니다." });
                           }}
-                          className="rounded-lg bg-white border border-slate-200 px-4 py-2 text-xs font-bold hover:bg-slate-50 transition-colors"
+                          className="ml-2 font-bold text-blue-600 underline"
                         >
-                          해결되지 않았습니다 (A/S 접수)
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setSymptomQuery("");
-                            setDiagnosis(null);
-                          }}
-                          className="rounded-lg bg-blue-600 text-white px-4 py-2 text-xs font-bold hover:bg-blue-700 transition-colors"
-                        >
-                          해결되었습니다
+                          바로 문의하기
                         </button>
                       </div>
-                    </div>
-                  ) : symptomQuery.length > 1 ? (
-                    <div className="rounded-lg bg-slate-50 p-4 text-center text-sm text-slate-500">
-                      매칭되는 자가 해결 가이드가 없습니다. <br/>
-                      <button onClick={() => setAsStep("form")} className="mt-2 font-bold text-blue-600 underline">상세 내용을 적어서 접수하기</button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-                    <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder="요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" />
+                    <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder={draft.category === "tablet" ? "요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" : "요청 제목을 적어주세요"} />
                     <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
                       <option value="" disabled>선택해주세요</option>
                       <option>손샘학원(본사)</option>
@@ -431,14 +531,22 @@ export function UserPortal() {
                     value={draft.detail}
                     onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
                     className="field"
-                    placeholder={draft.category === "equipment" ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)" : "상세 내용을 적어주세요"}
+                    placeholder={
+                      draft.category === "equipment"
+                        ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)"
+                        : draft.category === "tablet"
+                          ? "예: 교재 열람, 테스트용, 상담실 안내용"
+                          : draft.category === "nas"
+                            ? "예: teacher@academy.local / 읽기-쓰기 / 교강사실 공유폴더"
+                            : "상세 내용을 적어주세요"
+                    }
                   />
                 </>
               )}
 
               {draft.category === "equipment" && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
-                  <h3 className="mb-4 text-sm font-bold text-blue-900">💻 장비 세부 사양 선택</h3>
+                  <h3 className="mb-4 text-sm font-bold text-blue-900">💻 조립 PC 부품 선택</h3>
                   
                   <div className="mb-6">
                     <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">빠른 구성 불러오기</p>
@@ -537,6 +645,15 @@ export function UserPortal() {
                       onChange={(event) => setDraft({ ...draft, urgentReason: event.target.value })}
                       className="field mt-2 w-full"
                       placeholder="예: 오늘 3시 수업 진행 불가 (기기 작동 오류)"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-red-800">영향 범위</label>
+                    <input
+                      value={draft.urgentImpact}
+                      onChange={(event) => setDraft({ ...draft, urgentImpact: event.target.value })}
+                      className="field mt-2 w-full"
+                      placeholder="예: 3개 반 수업 차질, 상담실 업무 중단"
                     />
                   </div>
                   <p className="text-xs text-red-700">긴급 요청 시에는 우선 처리를 위한 구체적인 사유를 적어주세요.</p>

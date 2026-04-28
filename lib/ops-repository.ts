@@ -26,6 +26,16 @@ type DbRequest = {
   created_at: string;
 };
 
+type DbFaq = {
+  id: string;
+  keyword: string;
+  category: string;
+  answer: string;
+  escalation_required: boolean;
+};
+
+type ApprovalDecision = "pending" | "approved" | "rejected";
+
 const statusToDb: Record<WorkStatus, DbStatus> = {
   접수: "received",
   검토: "reviewing",
@@ -57,6 +67,32 @@ const priorityFromDb: Record<DbPriority, WorkPriority> = {
   high: "높음",
   urgent: "긴급"
 };
+
+function buildApprovalFlow(item: WorkItem): Array<{ step_order: number; approver_role: UserRole }> {
+  if (item.module === "NAS") {
+    return [
+      { step_order: 1, approver_role: "nas_admin" },
+      { step_order: 2, approver_role: "super_admin" }
+    ];
+  }
+
+  if (item.module === "전산 장비") {
+    return [
+      { step_order: 1, approver_role: "academy_admin" },
+      { step_order: 2, approver_role: "executive" },
+      { step_order: 3, approver_role: "super_admin" }
+    ];
+  }
+
+  if (item.priority === "긴급") {
+    return [
+      { step_order: 1, approver_role: "academy_admin" },
+      { step_order: 2, approver_role: "super_admin" }
+    ];
+  }
+
+  return [{ step_order: 1, approver_role: "academy_admin" }];
+}
 
 export async function ensureProfile(supabase: SupabaseClient, user: User) {
   const email = user.email ?? "unknown@academy.local";
@@ -104,7 +140,7 @@ export async function fetchRequests(supabase: SupabaseClient): Promise<WorkItem[
 }
 
 export async function createRequest(supabase: SupabaseClient, user: User, item: WorkItem) {
-  const { error } = await supabase.from("ops_requests").insert({
+  const { data, error } = await supabase.from("ops_requests").insert({
     request_no: item.id,
     module: item.module,
     title: item.title,
@@ -122,9 +158,25 @@ export async function createRequest(supabase: SupabaseClient, user: User, item: 
     urgent_reason: item.urgentReason ?? null,
     urgent_impact: item.urgentImpact ?? null,
     evidence_files: item.evidenceFiles ?? []
-  });
+  }).select("id").single();
 
   if (error) throw error;
+
+  if (!data?.id) return;
+
+  const approvalFlow = buildApprovalFlow(item);
+  if (approvalFlow.length > 0) {
+    const { error: approvalError } = await supabase.from("approvals").insert(
+      approvalFlow.map((step) => ({
+        request_id: data.id,
+        step_order: step.step_order,
+        approver_role: step.approver_role,
+        decision: "pending" satisfies ApprovalDecision
+      }))
+    );
+
+    if (approvalError) throw approvalError;
+  }
 }
 
 export async function updateRequestStatus(supabase: SupabaseClient, item: WorkItem) {
@@ -139,6 +191,47 @@ export async function updateRequestStatus(supabase: SupabaseClient, item: WorkIt
     .eq("request_no", item.id);
 
   if (error) throw error;
+}
+
+export async function decideApprovalStep(
+  supabase: SupabaseClient,
+  requestNo: string,
+  role: UserRole,
+  decision: Exclude<ApprovalDecision, "pending">,
+  note?: string
+) {
+  const { data: request, error: requestError } = await supabase
+    .from("ops_requests")
+    .select("id")
+    .eq("request_no", requestNo)
+    .maybeSingle();
+
+  if (requestError) throw requestError;
+  if (!request?.id) return;
+
+  const { data: approval, error: approvalError } = await supabase
+    .from("approvals")
+    .select("id, step_order")
+    .eq("request_id", request.id)
+    .eq("approver_role", role)
+    .eq("decision", "pending")
+    .order("step_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (approvalError) throw approvalError;
+  if (!approval?.id) return;
+
+  const { error: updateError } = await supabase
+    .from("approvals")
+    .update({
+      decision,
+      note: note ?? null,
+      decided_at: new Date().toISOString()
+    })
+    .eq("id", approval.id);
+
+  if (updateError) throw updateError;
 }
 
 export async function deleteRequest(supabase: SupabaseClient, id: string) {
@@ -173,13 +266,13 @@ function parseDueDate(value: string) {
   return null;
 }
 
-export async function fetchFaqs(supabase: SupabaseClient) {
+export async function fetchFaqs(supabase: SupabaseClient): Promise<DbFaq[]> {
   const { data, error } = await supabase
     .from("as_faqs")
     .select("*")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return data;
+  return (data ?? []) as DbFaq[];
 }
 
 export async function createAuditLog(supabase: SupabaseClient, log: { request_id?: string; actor_id: string; actor_label: string; event: string; metadata?: Record<string, unknown> }) {
