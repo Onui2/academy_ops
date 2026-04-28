@@ -336,26 +336,33 @@ export function UserPortal() {
     let resultItem: WorkItem | null = null;
 
     if (draft.resubmitId) {
-      const existing = submitted.find(s => s.id === draft.resubmitId);
-      if (existing) {
-        const updated: WorkItem = {
-          ...existing,
-          title: finalTitle,
-          requester: draft.academy,
-          status: "접수", // Resubmitting resets to initial status
-          priority,
-          description,
-          urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
-          urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
-          audit: `${existing.id} 보류 후 재접수됨`
-        };
+      try {
+        const existing = submitted.find(s => s.id === draft.resubmitId);
+        if (existing) {
+          const updated: WorkItem = {
+            ...existing,
+            title: finalTitle,
+            requester: draft.academy,
+            status: "접수", // Resubmitting resets to initial status
+            priority,
+            description,
+            urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
+            urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
+            audit: `${existing.id} 보류 후 재접수됨`
+          };
 
-        if (supabase && user) {
-          await updateRequestStatus(supabase, updated);
-        } else {
-          updateInAdminQueue(updated);
+          if (supabase && user) {
+            await updateRequestStatus(supabase, updated);
+          } else {
+            updateInAdminQueue(updated);
+          }
+          resultItem = updated;
+          addToast("재접수가 완료되었습니다.", "success");
         }
-        resultItem = updated;
+      } catch (error) {
+        addToast(error instanceof Error ? error.message : "재접수 중 오류가 발생했습니다.", "error");
+        setIsLoading(false);
+        return;
       }
     } else {
       const item: WorkItem = {
@@ -378,21 +385,28 @@ export function UserPortal() {
         amount
       };
 
-      if (supabase && user) {
-        const { createRequest } = await import("@/lib/ops-repository");
-        await createRequest(supabase, user, item);
-        if (draft.category === "nas") {
-          await createNasPermissionRequest(supabase, {
-            user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? user.email ?? "unknown@academy.local",
-            resource_name: finalTitle,
-            permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
-            requested_by: user.id
-          });
+      try {
+        if (supabase && user) {
+          const { createRequest } = await import("@/lib/ops-repository");
+          await createRequest(supabase, user, item);
+          if (draft.category === "nas") {
+            await createNasPermissionRequest(supabase, {
+              user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? user.email ?? "unknown@academy.local",
+              resource_name: finalTitle,
+              permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
+              requested_by: user.id
+            });
+          }
+        } else {
+          pushToAdminQueue(item);
         }
-      } else {
-        pushToAdminQueue(item);
+        resultItem = item;
+        addToast("접수가 완료되었습니다.", "success");
+      } catch (error) {
+        addToast(error instanceof Error ? error.message : "접수 중 오류가 발생했습니다.", "error");
+        setIsLoading(false);
+        return;
       }
-      resultItem = item;
     }
 
     await loadHistory();
