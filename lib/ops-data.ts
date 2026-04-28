@@ -128,7 +128,7 @@ export const equipmentParts: EquipmentPart[] = [
   { id: "pwr-2", category: "Power", name: "750W 80PLUS Gold", price: 120000, description: "고효율 전력", performanceNote: "고성능 그래픽카드 장착 시 안정적인 전력을 공급합니다.", tier: "고성능" },
 
   // Graphic Card
-  { id: "gpu-1", category: "Graphic Card", name: "내장 그래픽 (UHD 770)", price: 0, description: "사무용", performanceNote: "일반적인 영상 시청과 문서 작업에 충분합니다.", tier: "기본" },
+  { id: "gpu-1", category: "Graphic Card", name: "내장 그래픽 (Radeon Graphics)", price: 0, description: "사무용", performanceNote: "일반적인 영상 시청과 문서 작업에 충분합니다.", tier: "기본" },
   { id: "gpu-2", category: "Graphic Card", name: "NVIDIA RTX 4060", price: 420000, description: "메인스트림", performanceNote: "배너 디자인, 영상 컷 편집이 수월해집니다.", tier: "업무용" },
   { id: "gpu-3", category: "Graphic Card", name: "NVIDIA RTX 4080", price: 1600000, description: "고성능 작업용", performanceNote: "3D 랜더링, 4K 영상 편집을 순식간에 끝냅니다.", tier: "고성능" },
 
