@@ -294,8 +294,8 @@ export function UserPortal() {
             <Megaphone className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">경영 지원 요청</h1>
-            <p className="text-sm text-slate-500">지점별 필요한 전산 업무를 신청하세요</p>
+            <h1 className="text-xl font-bold text-slate-900">경영지원 운영 허브</h1>
+            <p className="text-sm text-slate-500">손샘학원 경영지원 통합 운영 시스템</p>
           </div>
           <Link href="/" className="ml-auto rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50">
             관리자

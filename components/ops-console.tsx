@@ -694,8 +694,8 @@ export function OpsConsole() {
       <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="min-w-0">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-600 sm:text-[10px]">EduOS Manager</p>
-            <h1 className="truncate text-lg font-black tracking-tight text-slate-900 sm:text-xl">경영지원 시스템</h1>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-600 sm:text-[10px]">Management Support Ops</p>
+            <h1 className="truncate text-lg font-black tracking-tight text-slate-900 sm:text-xl">경영지원 운영 허브</h1>
           </div>
           <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 md:flex">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -721,7 +721,7 @@ export function OpsConsole() {
                   <HardDrive className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <div>
-                  <p className="font-bold">경영 지원 요청</p>
+                  <p className="font-bold text-slate-800">경영지원 운영</p>
                   <p className="text-xs text-gray-500">지점별 행정 업무 신청</p>
                 </div>
               </div>
