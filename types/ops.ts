@@ -76,3 +76,13 @@ export type EquipmentPreset = {
   group: "강사용(기본)" | "행정용(표준)" | "전문가용(고성능)";
   parts: Record<string, string>;
 };
+
+export type BasketItem = {
+  id: number;
+  category: string;
+  name: string;
+  price: number;
+  description: string;
+  performanceNote: string;
+  tier: string;
+};

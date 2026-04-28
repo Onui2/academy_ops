@@ -1,5 +1,6 @@
 import {
   Bot,
+  ClipboardList,
   Database,
   FileCheck2,
   HardDrive,
@@ -8,7 +9,14 @@ import {
   Search,
   ShieldCheck
 } from "lucide-react";
-import type { EquipmentPart, EquipmentPreset, ModuleSummary, WorkItem } from "@/types/ops";
+import type { BasketItem, EquipmentPart, EquipmentPreset, ModuleSummary, WorkItem } from "@/types/ops";
+
+export const partsCategories = [
+  { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
+  { id: "Input", name: "주변기기", icon: Headphones, items: ["Keyboard", "Mouse"] },
+  { id: "Cable", name: "케이블/허브", icon: Search, items: ["Cables"] },
+  { id: "Supply", name: "사무 소모품", icon: ClipboardList, items: ["Consumables"] }
+] as const;
 
 export const modules: ModuleSummary[] = [
   {

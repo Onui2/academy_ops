@@ -33,6 +33,7 @@ import {
   aiHarnessSteps, 
   equipmentParts, 
   modules, 
+  partsCategories,
   workItems as seedItems 
 } from "@/lib/ops-data";
 import { diagnosisPatterns } from "@/lib/diagnosis-data";
@@ -50,7 +51,7 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
-import type { UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { BasketItem, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
 type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly";
@@ -117,28 +118,12 @@ type NasPermissionRecord = {
   status: string;
   created_at: string;
 };
-type BasketItem = {
-  id: number;
-  category: string;
-  name: string;
-  price: number;
-  description: string;
-  performanceNote: string;
-  tier: string;
-};
 type FaqCategory = {
   id: string;
   title: string;
   desc: string;
   items: typeof diagnosisPatterns;
 };
-
-const partsCategories = [
-  { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
-  { id: "Input", name: "주변기기", icon: Headphones, items: ["Keyboard", "Mouse"] },
-  { id: "Cable", name: "케이블/허브", icon: Search, items: ["Cables"] },
-  { id: "Supply", name: "사무 소모품", icon: ClipboardList, items: ["Consumables"] }
-] as const;
 
 const storageKey = "academy-ops-hub-state-v2";
 const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
