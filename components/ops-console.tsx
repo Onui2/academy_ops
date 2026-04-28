@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   Bot,
   Check,
   CheckCircle2,
@@ -934,11 +935,11 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
               <p className="mt-1 min-h-10 text-sm text-muted-foreground leading-relaxed">{module.description}</p>
               <button onClick={() => {
                 const name = module.name;
-                if (name.includes("장비")) setActiveMenu("equipment");
-                else if (name.includes("A/S")) setActiveMenu("as");
-                else if (name.includes("NAS")) setActiveMenu("nas");
-                else if (name.includes("태블릿")) setActiveMenu("tablet");
-                else if (name.includes("부품")) setActiveMenu("parts");
+                if (name.includes("장비")) props.setActiveMenu("equipment");
+                else if (name.includes("A/S")) props.setActiveMenu("as");
+                else if (name.includes("NAS")) props.setActiveMenu("nas");
+                else if (name.includes("태블릿")) props.setActiveMenu("tablet");
+                else if (name.includes("부품")) props.setActiveMenu("parts");
               }} className="focus-ring mt-4 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors">
                 모듈 열기
               </button>
