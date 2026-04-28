@@ -27,8 +27,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
 import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
-import { equipmentParts, partsCategories } from "@/lib/ops-data";
-import type { BasketItem, WorkItem, WorkPriority } from "@/types/ops";
+import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-data";
+import type { BasketItem, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
 
 type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "parts" | "other";
 
@@ -256,6 +256,18 @@ export function UserPortal() {
 
   const removeFromBasket = (id: number) => {
     setPartsBasket(partsBasket.filter((p) => p.id !== id));
+  };
+
+  const applyPreset = (preset: EquipmentPreset) => {
+    const newBasket: BasketItem[] = [];
+    Object.values(preset.parts).forEach((partId) => {
+      const part = equipmentParts.find((p) => p.id === partId);
+      if (part) {
+        newBasket.push({ ...part, id: Date.now() + Math.random() });
+      }
+    });
+    setPartsBasket(newBasket);
+    addToast(`${preset.name} 구성이 적용되었습니다.`, "success");
   };
 
   const loadForResubmit = (item: WorkItem) => {
@@ -621,6 +633,26 @@ export function UserPortal() {
                           )}
                         </h4>
                       </div>
+
+                      {draft.requestItem === "데스크톱" && (
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {equipmentPresets.map((preset) => (
+                            <button
+                              key={preset.id}
+                              onClick={() => applyPreset(preset)}
+                              className="group relative flex flex-col items-start overflow-hidden rounded-2xl border border-blue-100 bg-white p-5 transition-all hover:border-blue-400 hover:shadow-lg"
+                            >
+                              <div className="absolute right-0 top-0 -mr-4 -mt-4 h-16 w-16 rounded-full bg-blue-50 transition-transform group-hover:scale-150" />
+                              <span className="relative rounded-lg bg-blue-600 px-2.5 py-1 text-[10px] font-black text-white uppercase">{preset.group}</span>
+                              <h5 className="relative mt-3 text-sm font-black text-slate-800">{preset.name}</h5>
+                              <p className="relative mt-1 text-[11px] font-medium text-slate-400">최적의 부품 조합을 원클릭으로 장바구니에 담습니다.</p>
+                              <div className="relative mt-4 flex items-center gap-1.5 text-xs font-bold text-blue-600">
+                                바로 구성하기 <ArrowRight className="h-3.5 w-3.5" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Large Card-style Category Selection */}
                       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
