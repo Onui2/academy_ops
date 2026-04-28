@@ -18,13 +18,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
 import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
-import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
-import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
+import type { WorkItem, WorkPriority } from "@/types/ops";
 
 type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "other";
 
 type RequestDraft = {
   category: Category;
+  requestItem?: string;
   title: string;
   academy: string;
   detail: string;
@@ -38,7 +38,7 @@ const categories = [
   {
     id: "equipment" as const,
     title: "장비가 필요해요",
-    desc: "노트북, 데스크탑, 모니터, 키보드, 마우스, 태블릿, 부품",
+    desc: "노트북, 데스크톱, 모니터, 태블릿, 네트워크/NAS",
     icon: Laptop,
     tone: "bg-blue-50 text-blue-700"
   },
@@ -111,6 +111,7 @@ const asFaqCategories = [
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
     category: "equipment",
+    requestItem: "데스크톱",
     title: "",
     academy: "",
     detail: "",
@@ -123,6 +124,7 @@ export function UserPortal() {
   const [files, setFiles] = useState<File[]>([]);
   const [supabase] = useState(() => createClient());
   const [isLoading, setIsLoading] = useState(false);
+  const [recentSubmission, setRecentSubmission] = useState<WorkItem | null>(null);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
   const [symptomQuery, setSymptomQuery] = useState("");
   const [diagnosis, setDiagnosis] = useState<{ diagnosis: string; solution: string[]; original: { keyword: string; category: string; answer: string } } | null>(null);
@@ -226,6 +228,7 @@ export function UserPortal() {
 
     setDraft({
       category: categoryMap[item.module] ?? "other",
+      requestItem: item.module === "전산 장비" ? extractRequestItem(item.description) : undefined,
       title: item.title,
       academy: item.requester,
       detail: item.description ?? "",
@@ -238,40 +241,22 @@ export function UserPortal() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const [config, setConfig] = useState<EquipmentConfig>({
-    parts: {
-      CPU: "cpu-2",
-      RAM: "ram-2",
-      SSD: "ssd-2",
-      "Graphic Card": "gpu-1",
-      Mainboard: "mb-1",
-      Power: "pwr-1",
-      Case: "case-1",
-      Monitor: "mon-1"
-    },
-    totalPrice: 0
-  });
-
-  const calculateTotal = useCallback((nextParts: Record<string, string>) => {
-    return Object.values(nextParts).reduce((sum, partId) => {
-      const part = equipmentParts.find((p) => p.id === partId);
-      return sum + (part?.price ?? 0);
-    }, 0);
-  }, []);
-
-  const totalPrice = useMemo(() => calculateTotal(config.parts), [config.parts, calculateTotal]);
-  const updateConfig = (category: string, partId: string) => {
-    setConfig({ ...config, parts: { ...config.parts, [category]: partId } });
-  };
-
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
-    if (draft.category === "equipment") return "부품을 직접 고르고 조립 PC 요청을 바로 접수할 수 있어요.";
+    if (draft.category === "equipment") return "장비 종류를 선택해서 운영팀 요청 큐로 바로 접수할 수 있어요.";
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
+  const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
+  const estimatedOwner = draft.category === "nas" ? "NAS 관리자" : draft.category === "as" ? "전산" : "학원 관리자";
+  const routingSteps = [
+    "요청 접수",
+    draft.category === "as" ? "자가 진단/FAQ 이력 확인" : "운영팀 분류",
+    draft.urgency === "긴급" ? "우선 검토" : `${estimatedOwner} 확인`,
+    draft.category === "nas" ? "권한 또는 접속 가이드 처리" : "승인 또는 일정 조율"
+  ];
 
   const submit = async () => {
     if (!draft.title.trim()) return;
@@ -280,27 +265,17 @@ export function UserPortal() {
     setIsLoading(true);
 
     const priority: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
-    const isCustom = draft.category === "equipment";
-
-    const configLines = isCustom
-      ? [
-        "--- 요청 사양 상세 ---",
-        ...Object.entries(config.parts).map(([cat, id]) => {
-          const part = equipmentParts.find((p) => p.id === id);
-          return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
-        }),
-        `대당 가격 합계: ${totalPrice.toLocaleString()}원`
-      ]
-      : [];
 
     const user = supabase ? (await supabase.auth.getUser()).data.user : null;
 
     const description = [
-      ...configLines,
+      draft.category === "equipment" && draft.requestItem ? `요청 장비: ${draft.requestItem}` : "",
       draft.category === "tablet" ? `처리 유형: ${draft.title.includes("연장") ? "연장" : draft.title.includes("반납") ? "반납" : "신규"}\n${draft.detail}` : draft.detail,
       draft.category === "nas" ? "안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다." : "",
       files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
     ].filter(Boolean).join("\n");
+
+    let resultItem: WorkItem | null = null;
 
     if (draft.resubmitId) {
       const existing = submitted.find(s => s.id === draft.resubmitId);
@@ -322,6 +297,7 @@ export function UserPortal() {
         } else {
           updateInAdminQueue(updated);
         }
+        resultItem = updated;
       }
     } else {
       const item: WorkItem = {
@@ -357,10 +333,12 @@ export function UserPortal() {
       } else {
         pushToAdminQueue(item);
       }
+      resultItem = item;
     }
 
     await loadHistory();
-    setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
+    setRecentSubmission(resultItem);
+    setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
     setFiles([]);
     setAsStep("searching");
     setSymptomQuery("");
@@ -386,11 +364,47 @@ export function UserPortal() {
       </header>
 
       <div className="mx-auto grid w-full max-w-[1560px] gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <section className="grid gap-6">
-          <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <section className="grid content-start gap-6 self-start">
+          {recentSubmission ? (
+            <section className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-100">
+                    <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-600">Request Accepted</p>
+                    <h2 className="mt-2 text-2xl font-black text-slate-900">{recentSubmission.id}</h2>
+                    <p className="mt-1 text-sm text-slate-600">{recentSubmission.title}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setRecentSubmission(null)}
+                  className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
+                >
+                  닫기
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">상태</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.status}</p>
+                </div>
+                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">담당</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.owner}</p>
+                </div>
+                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">우선순위</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.priority}</p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
             <p className="mt-1 text-sm text-gray-500">카테고리를 고르고 요청 내용을 적으면 운영팀으로 전달됩니다.</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
               {categories.map((item) => {
                 const Icon = item.icon;
                 const active = draft.category === item.id;
@@ -398,13 +412,13 @@ export function UserPortal() {
                   <button
                     key={item.id}
                     onClick={() => setDraft({ ...draft, category: item.id })}
-                    className={`rounded-lg border p-4 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                    className={`rounded-lg border px-4 py-3 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
                   >
-                    <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${item.tone}`}>
-                      <Icon className="h-5 w-5" aria-hidden="true" />
+                    <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.tone}`}>
+                      <Icon className="h-4.5 w-4.5" aria-hidden="true" />
                     </div>
-                    <p className="mt-3 whitespace-nowrap text-sm font-bold">{item.title}</p>
-                    <p className="mt-1 text-xs text-gray-500">{item.desc}</p>
+                    <p className="mt-2.5 whitespace-nowrap text-sm font-bold">{item.title}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{item.desc}</p>
                   </button>
                 );
               })}
@@ -517,8 +531,18 @@ export function UserPortal() {
                 </div>
               ) : (
                 <>
-                  <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                  <div className={`grid gap-3 ${draft.category === "equipment" ? "sm:grid-cols-[1fr_180px_160px]" : "sm:grid-cols-[1fr_160px]"}`}>
                     <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder={draft.category === "tablet" ? "요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" : "요청 제목을 적어주세요"} />
+                    {draft.category === "equipment" ? (
+                      <select value={draft.requestItem ?? "데스크톱"} onChange={(event) => setDraft({ ...draft, requestItem: event.target.value })} className="field" aria-label="장비 종류">
+                        <option>노트북</option>
+                        <option>데스크톱</option>
+                        <option>모니터</option>
+                        <option>태블릿</option>
+                        <option>네트워크/NAS</option>
+                        <option>기타 장비</option>
+                      </select>
+                    ) : null}
                     <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
                       <option value="" disabled>선택해주세요</option>
                       <option>손샘학원(본사)</option>
@@ -533,7 +557,7 @@ export function UserPortal() {
                     className="field"
                     placeholder={
                       draft.category === "equipment"
-                        ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)"
+                        ? "모델명, 수량, 설치 장소, 선호 브랜드 등 추가 요청 사항을 적어주세요"
                         : draft.category === "tablet"
                           ? "예: 교재 열람, 테스트용, 상담실 안내용"
                           : draft.category === "nas"
@@ -544,72 +568,48 @@ export function UserPortal() {
                 </>
               )}
 
-              {draft.category === "equipment" && (
-                <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
-                  <h3 className="mb-4 text-sm font-bold text-blue-900">💻 조립 PC 부품 선택</h3>
-                  
-                  <div className="mb-6">
-                    <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">빠른 구성 불러오기</p>
-                    <div className="flex flex-wrap gap-2">
-                      {equipmentPresets.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => setConfig({ ...config, parts: preset.parts })}
-                          className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm"
-                        >
-                          {preset.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-5">
-                    {Object.keys(config.parts).map((category) => (
-                      <div key={category} className="grid gap-2 sm:grid-cols-[100px_1fr]">
-                        <span className="text-xs font-bold text-slate-500">{category}</span>
-                        <div className="grid gap-2">
-                          <select
-                            value={config.parts[category] || ""}
-                            onChange={(e) => updateConfig(category, e.target.value)}
-                            className="field w-full border-blue-200 text-sm"
-                          >
-                            <option value="" disabled>선택해주세요</option>
-                            {equipmentParts
-                              .filter((p) => p.category === category)
-                              .map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.tier === "고성능" ? "🚀 " : p.tier === "업무용" ? "💼 " : ""}
-                                  {p.name} (+{p.price.toLocaleString()}원)
-                                </option>
-                              ))}
-                          </select>
-                          {config.parts[category] && (
-                            <p className="rounded-lg bg-white px-3 py-2 text-[11px] leading-relaxed text-blue-700 shadow-sm border border-blue-50">
-                              <span className="font-bold">✨ 전문가 코멘트:</span> {equipmentParts.find((p) => p.id === config.parts[category])?.performanceNote}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    <div className="mt-2 border-t border-blue-200 pt-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-bold text-blue-900">구성 합계 (VAT 별도)</span>
-                        <span className="text-lg font-black text-blue-600">{totalPrice.toLocaleString()}원</span>
-                      </div>
-                      <div className="mt-3 rounded-lg bg-white p-3 text-xs text-blue-800">
-                        {totalPrice > 1000000 ? (
-                          <p><strong>🚀 고성능:</strong> 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
-                        ) : totalPrice > 600000 ? (
-                          <p><strong>💼 표준:</strong> 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
-                        ) : (
-                          <p><strong>📝 기본:</strong> 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+              {draft.category === "equipment" ? (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-900">
+                  <h3 className="font-bold">장비 요청 안내</h3>
+                  <p className="mt-2 leading-relaxed">
+                    사용자 페이지에서는 장비 종류와 요청 내용을 기준으로 바로 접수합니다. 직접 부품을 고르는 방식은 제외했고, 운영팀 요청 큐에서 같은 기준으로 검토됩니다.
+                  </p>
                 </div>
-              )}
+              ) : null}
+              {draft.category === "other" ? (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    {
+                      title: "문제 설명",
+                      desc: "어떤 문제가 있는지 짧게 적어주세요.",
+                      tone: "bg-slate-50 text-slate-700"
+                    },
+                    {
+                      title: "위치 정보",
+                      desc: "지점, 층수, 교실명까지 적으면 빨라집니다.",
+                      tone: "bg-blue-50 text-blue-700"
+                    },
+                    {
+                      title: "처리 기한",
+                      desc: "언제까지 필요한지 같이 적어주세요.",
+                      tone: "bg-amber-50 text-amber-700"
+                    },
+                    {
+                      title: "운영팀 분류",
+                      desc: "장비, A/S, NAS, 기타 요청으로 자동 분류됩니다.",
+                      tone: "bg-emerald-50 text-emerald-700"
+                    }
+                  ].map((item) => (
+                    <article key={item.title} className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-bold ${item.tone}`}>
+                        안내
+                      </div>
+                      <p className="mt-3 text-sm font-bold text-slate-900">{item.title}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-500">{item.desc}</p>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 {(["보통", "빠름", "긴급"] as const).map((urgency) => (
                   <button
@@ -664,7 +664,7 @@ export function UserPortal() {
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
-                onClick={() => setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" })}
+                onClick={() => setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" })}
                 className="text-center text-sm font-semibold text-gray-500 hover:text-gray-800"
               >
                 취소하고 새로 작성하기
@@ -674,6 +674,45 @@ export function UserPortal() {
         </section>
 
         <aside className="grid gap-6 self-start">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Live Summary</p>
+            <h2 className="mt-1 font-black text-slate-900">실시간 요청 요약</h2>
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-400">제목 미리보기</p>
+                <p className="mt-1 text-sm font-black text-slate-900">{draft.title.trim() || `${selected.title} 요청`}</p>
+              </div>
+              <div className="grid gap-3">
+                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">예상 담당</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{estimatedOwner}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">우선순위</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{priorityLabel}</p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                {draft.urgency === "긴급" ? "긴급 사유가 포함되면 우선 검토 대상으로 바로 올라갑니다." : "일반 요청은 접수 후 운영팀 분류를 거쳐 담당자에게 전달됩니다."}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-600">Routing</p>
+            <h2 className="mt-1 font-black text-slate-900">처리 흐름 안내</h2>
+            <div className="mt-4 grid gap-3">
+              {routingSteps.map((step, index) => (
+                <div key={step} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[11px] font-black text-white">
+                    {index + 1}
+                  </div>
+                  <p className="pt-0.5 text-sm font-medium text-slate-700">{step}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-2">
               <Search className="h-4 w-4 text-gray-500" aria-hidden="true" />
@@ -737,6 +776,12 @@ function categoryToModule(category: Category) {
   if (category === "nas") return "NAS";
   if (category === "tablet") return "태블릿";
   return "기타";
+}
+
+function extractRequestItem(description?: string) {
+  if (!description) return "데스크톱";
+  const match = description.match(/요청 장비:\s*(.+)/);
+  return match?.[1]?.trim() || "데스크톱";
 }
 
 function makeRequestId() {

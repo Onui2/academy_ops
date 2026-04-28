@@ -497,6 +497,7 @@ export function OpsConsole() {
       setActiveMenu("queue");
       addAudit("Router AI", `${id} ${request.module} 요청 접수`);
       addToast(`${id} 요청이 성공적으로 접수되었습니다.`, "success");
+      return next;
     } catch (error) {
       setSyncState(error instanceof Error ? error.message : "요청 생성 실패");
       addToast("요청 생성 중 오류가 발생했습니다.", "error");
@@ -589,9 +590,9 @@ export function OpsConsole() {
     addToast("요청이 삭제되었습니다.", "info");
   };
 
-  const createManualRequest = () => {
+  const createManualRequest = async () => {
     if (!form.title.trim()) return;
-    addRequest({
+    const created = await addRequest({
       module: form.module,
       title: form.title,
       requester: form.requester,
@@ -614,6 +615,7 @@ export function OpsConsole() {
       source: "admin_console"
     });
     setForm(defaultForm);
+    return created;
   };
 
   const createEquipment = () => {
@@ -922,7 +924,7 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
               {activeMenu === "tablet" ? <TabletScreen tablet={tablet} setTablet={setTablet} createTabletRequest={createTabletRequest} role={role} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
@@ -1136,12 +1138,13 @@ function QueueScreen(props: {
   remove: (id: string) => void;
   form: RequestForm;
   setForm: (value: RequestForm) => void;
-  createManualRequest: () => void;
+  createManualRequest: () => Promise<WorkItem | undefined>;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<WorkItem | null>(null);
   const [rejectionTarget, setRejectionTarget] = useState<WorkItem | null>(null);
+  const [receiptItem, setReceiptItem] = useState<WorkItem | null>(null);
 
   const openDetail = (id: string) => {
     props.setSelectedId(id);
@@ -1156,11 +1159,19 @@ function QueueScreen(props: {
           <RequestComposer
             form={props.form}
             setForm={props.setForm}
-            createRequest={() => {
-              props.createManualRequest();
-              setCreateOpen(false);
+            createRequest={async () => {
+              const created = await props.createManualRequest();
+              if (created) {
+                setReceiptItem(created);
+                setCreateOpen(false);
+              }
             }}
           />
+        </Modal>
+      ) : null}
+      {receiptItem ? (
+        <Modal title="접수 완료" onClose={() => setReceiptItem(null)}>
+          <RequestReceiptCard item={receiptItem} onClose={() => setReceiptItem(null)} />
         </Modal>
       ) : null}
       {detailOpen && props.selectedItem ? (
@@ -1301,13 +1312,15 @@ function EquipmentScreen({
   setEquipment,
   createEquipment,
   partsBasket,
-  setPartsBasket
+  setPartsBasket,
+  setActiveMenu
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
   createEquipment: () => void;
   partsBasket: BasketItem[];
   setPartsBasket: (v: BasketItem[]) => void;
+  setActiveMenu: (menu: MenuKey) => void;
 }) {
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
   const isDesktop = equipment.item === "데스크톱";
@@ -1353,6 +1366,15 @@ function EquipmentScreen({
                 </div>
                 <div className="rounded-xl border border-blue-200 bg-white p-4 text-sm text-slate-600">
                   CPU 같은 세부 부품 선택은 여기서 하지 않고, `부품 구매` 메뉴에서 담은 구성으로 데스크톱 요청이 생성됩니다.
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setActiveMenu("parts")}
+                    className="focus-ring inline-flex h-10 items-center justify-center rounded-xl border border-blue-200 bg-white px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    추가하러 가기
+                  </button>
                 </div>
                 {partsBasket.length === 0 ? (
                   <div className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
@@ -1824,6 +1846,19 @@ function IconButton({ label, disabled, onClick, icon: Icon, tone }: { label: str
   return <button onClick={onClick} disabled={disabled} className={`focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30 ${tone}`} aria-label={label}><Icon className="h-4 w-4" aria-hidden="true" /></button>;
 }
 
+function FieldError({ message, visible }: { message: string; visible: boolean }) {
+  return (
+    <div className="min-h-[20px] pt-1">
+      {visible ? <p className="text-xs font-bold text-rose-600">{message}</p> : null}
+    </div>
+  );
+}
+
+function extractAmountValue(value: string) {
+  const numeric = Number(value.replace(/[^\d]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void }) {
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
@@ -1831,6 +1866,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
   });
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const earliestDate = useMemo(() => getEarliestSelectableDate(form), [form]);
   const earliestIso = useMemo(() => earliestDate.toISOString().slice(0, 10), [earliestDate]);
@@ -1897,6 +1933,48 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
         : form.priority === "보통"
           ? "border-blue-200 bg-blue-50 text-blue-700"
           : "border-slate-200 bg-slate-50 text-slate-600";
+  const requiredErrors = {
+    title: !form.title.trim(),
+    requester: !form.requester.trim(),
+    requesterContact: !form.requesterContact.trim(),
+    neededDate: !form.neededDate.trim(),
+    amount: !form.amount.trim(),
+    description: !form.description.trim(),
+    requestItem: form.module === "전산 장비" && !form.requestItem.trim()
+  };
+  const hasRequiredErrors = Object.values(requiredErrors).some(Boolean);
+  const showError = (key: keyof typeof requiredErrors) => submitAttempted && requiredErrors[key];
+  const requiredLabel = (label: string) => (
+    <>
+      {label} <span className="text-rose-500">*</span>
+    </>
+  );
+  const amountValue = extractAmountValue(form.amount);
+  const ownerLabel = form.module === "NAS" ? "NAS 관리자" : form.module === "A/S" ? "전산" : "경영지원";
+  const requestItemLabel =
+    form.module === "전산 장비"
+      ? form.requestItem || "품목 선택 필요"
+      : form.module === "A/S"
+        ? "장애/문의"
+        : form.module === "NAS"
+          ? "네트워크/NAS"
+          : "운영 요청";
+  const routeSteps = [
+    "접수 큐 등록",
+    form.priority === "긴급" ? "우선 검토 즉시 시작" : "운영팀 1차 검토",
+    amountValue >= 700000 || amountValue >= 2
+      ? "승인 라우트 확인"
+      : `${ownerLabel} 직접 배정`,
+    form.module === "NAS"
+      ? "권한/접속 가이드 처리"
+      : form.module === "A/S"
+        ? "FAQ 확인 후 티켓 진행"
+        : "발주 또는 일정 조율"
+  ];
+  const completionHint =
+    form.priority === "긴급"
+      ? "긴급 우선순위로 가장 먼저 검토됩니다."
+      : `현재 규칙상 가장 빠른 처리 가능일은 ${formatDateLabel(earliestIso)} 입니다.`;
 
   return (
     <section className="grid gap-6">
@@ -1934,11 +2012,11 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
                   </select>
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">요청 품목</span>
+                  <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 품목")}</span>
                   <select
                     value={form.requestItem}
                     onChange={(event) => setForm({ ...form, requestItem: event.target.value })}
-                    className="field"
+                    className={`field ${showError("requestItem") ? "border-rose-300 bg-rose-50/40" : ""}`}
                     aria-label="요청 품목"
                     disabled={form.module !== "전산 장비"}
                   >
@@ -1946,6 +2024,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
                       <option key={option}>{option}</option>
                     ))}
                   </select>
+                  <FieldError message="전산 장비 요청은 품목을 선택해 주세요." visible={showError("requestItem")} />
                 </label>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -1960,8 +2039,9 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
                 </label>
               </div>
               <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">요청 제목</span>
-                <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="field" placeholder="예: 범어점 상담실 모니터 2대 신규 구매 요청" />
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 제목")}</span>
+                <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={`field ${showError("title") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 범어점 상담실 모니터 2대 신규 구매 요청" />
+                <FieldError message="요청 제목은 필수입니다." visible={showError("title")} />
               </label>
             </div>
           </section>
@@ -1973,16 +2053,18 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
             </div>
             <div className="grid gap-4 p-5 md:grid-cols-2">
               <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">요청 부서/지점</span>
-                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className="field" placeholder="손샘학원(본사)" />
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 부서/지점")}</span>
+                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className={`field ${showError("requester") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="손샘학원(본사)" />
+                <FieldError message="요청 부서/지점을 입력해 주세요." visible={showError("requester")} />
               </label>
               <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">담당 연락처</span>
-                <input value={form.requesterContact} onChange={(event) => setForm({ ...form, requesterContact: event.target.value })} className="field" placeholder="예: 내선 203 / 010-0000-0000" />
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("담당 연락처")}</span>
+                <input value={form.requesterContact} onChange={(event) => setForm({ ...form, requesterContact: event.target.value })} className={`field ${showError("requesterContact") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 내선 203 / 010-0000-0000" />
+                <FieldError message="담당 연락처를 입력해 주세요." visible={showError("requesterContact")} />
               </label>
               <label className="grid gap-2 md:col-span-2">
-                <span className="text-xs font-bold text-slate-500">희망 처리일</span>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("희망 처리일")}</span>
+                <div className={`rounded-2xl border bg-white p-4 ${showError("neededDate") ? "border-rose-300 bg-rose-50/20" : "border-slate-200"}`}>
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <CalendarDays className="h-4 w-4 text-blue-600" aria-hidden="true" />
@@ -2040,6 +2122,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
                     </>
                   ) : null}
                 </div>
+                <FieldError message="희망 처리일을 선택해 주세요." visible={showError("neededDate")} />
               </label>
             </div>
           </section>
@@ -2052,8 +2135,9 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
             <div className="grid gap-4 p-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">예산 또는 수량</span>
-                  <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="field" placeholder="예: 2대 / 1,200,000원" />
+                  <span className="text-xs font-bold text-slate-500">{requiredLabel("예산 또는 수량")}</span>
+                  <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className={`field ${showError("amount") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 2대 / 1,200,000원" />
+                  <FieldError message="예산 또는 수량을 입력해 주세요." visible={showError("amount")} />
                 </label>
                 <label className="grid gap-2">
                   <span className="text-xs font-bold text-slate-500">업체</span>
@@ -2061,26 +2145,154 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
                 </label>
               </div>
               <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">상세 내용</span>
-                <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-40 rounded-xl border border-gray-200 bg-white p-4 text-sm outline-none focus:border-blue-500" placeholder="요청 배경, 설치 위치, 사용 목적, 참고 사항, 승인에 필요한 내용을 자세히 적어주세요." />
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("상세 내용")}</span>
+                <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className={`min-h-40 rounded-xl border bg-white p-4 text-sm outline-none focus:border-blue-500 ${showError("description") ? "border-rose-300 bg-rose-50/40" : "border-gray-200"}`} placeholder="요청 배경, 설치 위치, 사용 목적, 참고 사항, 승인에 필요한 내용을 자세히 적어주세요." />
+                <FieldError message="상세 내용을 입력해 주세요." visible={showError("description")} />
               </label>
             </div>
           </section>
         </div>
 
         <aside className="grid gap-5 self-start">
-          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <h4 className="text-sm font-black text-slate-900">접수 전 확인</h4>
-            <div className="mt-4 grid gap-3 text-xs leading-relaxed text-slate-600">
-              <p>• 제목은 한눈에 식별되도록 `지점 + 품목 + 목적` 순서로 적는 것이 좋습니다.</p>
-              <p>• 예산 또는 수량이 정확할수록 승인과 발주가 빨라집니다.</p>
-              <p>• 긴급 건은 상세 내용에 운영 영향과 처리 사유를 꼭 적어주세요.</p>
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Live Summary</p>
+              <h4 className="mt-1 text-sm font-black text-slate-900">실시간 접수 요약</h4>
+            </div>
+            <div className="grid gap-3 p-5">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-400">제목 미리보기</p>
+                <p className="mt-1 text-sm font-black text-slate-900">
+                  {form.title.trim() || `${form.requester || "지점"} ${requestItemLabel} 요청`}
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">예상 담당</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{ownerLabel}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">요청 분류</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{form.module} · {requestItemLabel}</p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <p className="font-black">처리 메모</p>
+                <p className="mt-1 leading-relaxed">{completionHint}</p>
+              </div>
             </div>
           </section>
-          <button onClick={createRequest} className="focus-ring inline-flex h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-xl shadow-blue-100 hover:bg-blue-700">
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-violet-50 px-5 py-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-600">Routing</p>
+              <h4 className="mt-1 text-sm font-black text-slate-900">자동 라우팅 안내</h4>
+            </div>
+            <div className="grid gap-3 p-5">
+              {routeSteps.map((step, index) => (
+                <div key={step} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[11px] font-black text-white">
+                    {index + 1}
+                  </div>
+                  <p className="pt-0.5 text-sm font-medium leading-relaxed text-slate-700">{step}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+                  <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Checklist</p>
+                  <h4 className="mt-1 text-sm font-black text-slate-900">접수 전 확인</h4>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 p-5">
+              <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">
+                `*` 표시 항목은 필수 입력값입니다.
+              </div>
+              {[
+                "`지점 + 품목 + 목적` 순서로 제목을 적으면 한눈에 식별하기 좋습니다.",
+                "예산 또는 수량이 정확할수록 승인과 발주가 빨라집니다.",
+                "긴급 건은 상세 내용에 운영 영향과 처리 사유를 꼭 적어주세요."
+              ].map((item) => (
+                <div key={item} className="flex gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600">
+                  <span className="mt-0.5 text-blue-600">•</span>
+                  <p>{item}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+          {submitAttempted && hasRequiredErrors ? (
+            <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+              필수 입력값을 모두 작성한 뒤 요청서를 접수할 수 있습니다.
+            </p>
+          ) : null}
+          <button
+            onClick={() => {
+              setSubmitAttempted(true);
+              if (hasRequiredErrors) return;
+              createRequest();
+            }}
+            className="focus-ring inline-flex h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-xl shadow-blue-100 hover:bg-blue-700"
+          >
             요청서 접수
           </button>
         </aside>
+      </div>
+    </section>
+  );
+}
+
+function RequestReceiptCard({ item, onClose }: { item: WorkItem; onClose: () => void }) {
+  const nextOwner = item.owner || (item.module === "NAS" ? "NAS 관리자" : item.module === "A/S" ? "전산" : "경영지원");
+  const summaryLines = [
+    `${item.module} · ${item.priority}`,
+    `요청 부서: ${item.requester}`,
+    `예정 처리일: ${item.due || "미정"}`
+  ];
+
+  return (
+    <section className="grid gap-5">
+      <div className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-white p-5">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-100">
+            <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-600">Request Accepted</p>
+            <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">{item.id}</h3>
+            <p className="mt-2 text-sm text-slate-600">{item.title}</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-[11px] font-bold text-slate-400">현재 상태</p>
+          <p className="mt-1 text-lg font-black text-slate-900">{item.status}</p>
+          <p className="mt-3 text-sm text-slate-600">다음 담당은 <span className="font-bold text-slate-900">{nextOwner}</span> 입니다.</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-[11px] font-bold text-slate-400">접수 요약</p>
+          <div className="mt-3 grid gap-2">
+            {summaryLines.map((line) => (
+              <div key={line} className="rounded-xl bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        요청 큐에서 방금 접수된 건을 바로 확인하고, 승인 또는 보류 사유도 이어서 관리할 수 있습니다.
+      </div>
+      <div className="flex justify-end">
+        <button onClick={onClose} className="focus-ring inline-flex h-11 items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-bold text-white hover:bg-slate-800">
+          확인
+        </button>
       </div>
     </section>
   );
@@ -2169,7 +2381,7 @@ function printWorkItem(item: WorkItem) {
       </head>
       <body>
         <h1>${escapeHtml(item.title)}</h1>
-        <div class="muted">Academy Ops Hub 업무 접수증</div>
+        <div class="muted">경영지원 운영 허브 업무 접수증</div>
         <table>
           <tbody>
             ${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join("")}
