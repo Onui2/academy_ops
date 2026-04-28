@@ -248,7 +248,7 @@ export function UserPortal() {
       );
     }
     return result;
-  }, [selectedPartCategory, partQuery]);
+  }, [selectedPartCategory, selectedSubCategory, partQuery]);
 
   const addToBasket = (part: Omit<BasketItem, "id">) => {
     setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
