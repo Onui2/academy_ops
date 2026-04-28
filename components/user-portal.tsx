@@ -646,6 +646,13 @@ export function UserPortal() {
                         <option>기타 장비</option>
                       </select>
                     ) : null}
+                    <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
+                      <option value="" disabled>선택해주세요</option>
+                      <option>손샘학원(본사)</option>
+                      <option>손샘(수원)</option>
+                      <option>손샘(대치)</option>
+                      <option>손샘(범어)</option>
+                    </select>
                   </div>
                   {draft.category === "equipment" && draft.requestItem === "데스크톱" && (
                     <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 flex items-center justify-between gap-4">
@@ -666,14 +673,6 @@ export function UserPortal() {
                       </button>
                     </div>
                   )}
-                    <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
-                      <option value="" disabled>선택해주세요</option>
-                      <option>손샘학원(본사)</option>
-                      <option>손샘(수원)</option>
-                      <option>손샘(대치)</option>
-                      <option>손샘(범어)</option>
-                    </select>
-                  </div>
                   <input
                     value={draft.detail}
                     onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
