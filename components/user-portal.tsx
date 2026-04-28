@@ -20,7 +20,7 @@ import { fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-reposit
 import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
 import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
 
-type Category = "equipment" | "as" | "software" | "network" | "subly" | "nas" | "tablet" | "other";
+type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "other";
 
 type RequestDraft = {
   category: Category;
@@ -149,7 +149,6 @@ export function UserPortal() {
     const categoryMap: Record<string, Category> = {
       "전산 장비": "equipment",
       "A/S": "as",
-      "서블리": "subly",
       "NAS": "nas",
       "태블릿": "tablet",
       "기타": "other"
@@ -199,7 +198,6 @@ export function UserPortal() {
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
-    if (draft.category === "subly") return "제작물 종류, 수량, 희망 납기, 참고 파일 여부를 적어주세요.";
     if (draft.category === "equipment") return "필요한 장비명, 수량, 사용 장소, 희망 일정을 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
@@ -599,7 +597,6 @@ export function UserPortal() {
 function categoryToModule(category: Category) {
   if (category === "equipment") return "전산 장비";
   if (category === "as") return "A/S";
-  if (category === "subly") return "서블리";
   if (category === "nas") return "NAS";
   if (category === "tablet") return "태블릿";
   return "기타";

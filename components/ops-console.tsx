@@ -48,7 +48,7 @@ import { StatusPill } from "@/components/status-pill";
 import type { EquipmentConfig, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
-type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "nas" | "audit" | "subly";
+type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = {
@@ -99,6 +99,8 @@ const menuItems: { key: MenuKey; label: string; icon: LucideIcon }[] = [
   { key: "dashboard", label: "대시보드", icon: Home },
   { key: "queue", label: "요청 큐", icon: ClipboardList },
   { key: "equipment", label: "장비 구매", icon: PackageCheck },
+  { key: "parts", label: "부품 구매", icon: Search },
+  { key: "tablet", label: "태블릿 렌탈", icon: PackageCheck },
   { key: "as", label: "A/S", icon: Stethoscope },
   { key: "nas", label: "NAS", icon: HardDrive },
   { key: "audit", label: "감사/AI", icon: Activity }
@@ -183,6 +185,7 @@ export function OpsConsole() {
   const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
+  const [partsBasket, setPartsBasket] = useState<any[]>([]);
   const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
   const [audit, setAudit] = useState<AuditEvent[]>(initialAudit);
@@ -201,6 +204,14 @@ export function OpsConsole() {
     purpose: "",
     roles: ["데스크"],
     notes: ""
+  });
+  const [tablet, setTablet] = useState({
+    academy: "",
+    model: "iPad Air (5th Gen)",
+    count: 1,
+    duration: "12개월",
+    purpose: "교재 열람용",
+    neededDate: new Date().toISOString().slice(0, 10)
   });
   const [nasUser, setNasUser] = useState("new.staff@academy.local");
   const [webdav, setWebdav] = useState<WebDavResult | null>(null);
@@ -479,18 +490,26 @@ export function OpsConsole() {
   };
 
   const createEquipment = () => {
-    const isCustom = equipment.item === "노트북" || equipment.item === "데스크톱";
-    const basePrice = isCustom ? totalPrice : equipment.unitPrice;
-    const total = equipment.count * basePrice;
+    const isDesktop = equipment.item === "데스크톱";
+    const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
+    const basePrice = isDesktop ? totalPrice : equipment.unitPrice;
+    const total = (equipment.count * basePrice) + basketTotal;
     const needsAccountingConfirm = total > 500000;
 
-    const configLines = isCustom
+    const configLines = isDesktop
       ? [
-          "--- 커스텀 사양 ---",
+          "--- 본체 조립 사양 ---",
           ...Object.entries(config.parts).map(([cat, id]) => {
             const part = equipmentParts.find((p) => p.id === id);
             return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
           })
+        ]
+      : [];
+
+    const basketLines = partsBasket.length > 0
+      ? [
+          "--- 추가 구성품 (장바구니) ---",
+          ...partsBasket.map(p => `${p.name}: ${p.price.toLocaleString()}원`)
         ]
       : [];
 
@@ -500,21 +519,20 @@ export function OpsConsole() {
       requester: equipment.academy,
       owner: "경영지원",
       status: needsAccountingConfirm ? "승인 대기" : "검토",
-      priority: needsAccountingConfirm ? "높음" : "보통",
+      priority: (total >= 1500000 || equipment.count >= 2) ? "높음" : "보통",
       due: equipment.neededDate || "이번 주",
       audit: needsAccountingConfirm ? "50만원 초과 구매로 회계팀 컨펌 필요" : "예산 산출 및 승인 라우팅 완료",
       amount: `${equipment.count}대 / ${total.toLocaleString("ko-KR")}원`,
       vendor: "미정",
       description: [
         needsAccountingConfirm ? "안내: 50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "",
-        `처리 분류: ${equipment.processType}`,
         `품목: ${equipment.item}`,
         ...configLines,
+        ...basketLines,
         `수량: ${equipment.count}`,
-        `대당 단가: ${basePrice.toLocaleString()}원`,
+        `본체/본품 단가: ${basePrice.toLocaleString()}원`,
         `장비 사용자: ${equipment.userName || "미입력"}`,
         `사용 목적: ${equipment.purpose || "미입력"}`,
-        `직무: ${equipment.roles.length ? equipment.roles.join(", ") : "미선택"}`,
         `전달 사항: ${equipment.notes || "없음"}`
       ].filter(Boolean).join("\n"),
       approvalStep: needsAccountingConfirm ? 2 : 1,
@@ -548,6 +566,22 @@ export function OpsConsole() {
     due: "오늘",
     audit: "MFA 확인 필요",
     description: "신규 직원 공용 NAS 접속 권한과 RaiDrive 안내 필요"
+  });
+  
+  const createTabletRequest = () => addRequest({
+    module: "태블릿 렌탈",
+    title: `${tablet.academy} ${tablet.model} ${tablet.count}대 렌탈`,
+    requester: tablet.academy,
+    owner: "경영지원",
+    status: "접수",
+    priority: "보통",
+    due: tablet.neededDate,
+    audit: "렌탈 업체 견적 요청 대기",
+    description: `모델: ${tablet.model}\n수량: ${tablet.count}대\n기간: ${tablet.duration}\n용도: ${tablet.purpose}`,
+    amount: `${tablet.count}대 / ${tablet.duration}`,
+    vendor: "미정",
+    approvalStep: 0,
+    source: "admin_console"
   });
 
   const checkWebDav = async () => {
@@ -656,29 +690,30 @@ export function OpsConsole() {
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-gray-200 bg-white">
+      <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">EduOS Manager</p>
-            <h1 className="text-xl font-black tracking-tight text-slate-900">경영지원 관리 시스템</h1>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-600 sm:text-[10px]">EduOS Manager</p>
+            <h1 className="truncate text-lg font-black tracking-tight text-slate-900 sm:text-xl">경영지원 시스템</h1>
           </div>
           <div className="ml-auto hidden min-w-[260px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 md:flex">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 학원, 담당 검색" />
           </div>
-          <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold">
-            {roles.find((item) => item.value === role)?.label ?? "관리자"}
-          </span>
-          <span className="hidden rounded-lg bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600 lg:inline-flex">{syncState}</span>
-          <button onClick={signOut} className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700" aria-label="로그아웃">
-            <LogOut className="h-5 w-5" aria-hidden="true" />
-          </button>
+          <div className="ml-auto flex items-center gap-2 md:ml-0">
+            <span className="hidden rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-bold sm:inline-flex md:px-3 md:py-2 md:text-sm">
+              {roles.find((item) => item.value === role)?.label ?? "관리자"}
+            </span>
+            <button onClick={signOut} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700 sm:h-10 sm:w-10" aria-label="로그아웃">
+              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 lg:grid-cols-[256px_minmax(0,1fr)] lg:px-8">
         <nav className="lg:sticky lg:top-[73px] lg:self-start">
-          <div className="surface flex gap-2 overflow-x-auto rounded-lg p-4 lg:grid">
+          <div className="surface flex gap-1 overflow-x-auto rounded-xl p-2 scrollbar-hide lg:grid lg:gap-2 lg:p-4">
             <div className="hidden border-b border-gray-200 pb-4 lg:block">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
@@ -686,7 +721,7 @@ export function OpsConsole() {
                 </div>
                 <div>
                   <p className="font-bold">경영 지원 요청</p>
-                  <p className="text-xs text-gray-500">지점별 필요한 행정/운영 업무를 신청하세요</p>
+                  <p className="text-xs text-gray-500">지점별 행정 업무 신청</p>
                 </div>
               </div>
               <div className="mt-4 space-y-2">
@@ -695,11 +730,6 @@ export function OpsConsole() {
                   <span className="text-gray-900">{pendingCount}</span>
                 </div>
                 <div className="progress-track"><div className="progress-fill" style={{ width: `${Math.min(pendingCount * 12, 100)}%` }} /></div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-gray-600">승인 대기</span>
-                  <span className="text-gray-900">{approvalCount}</span>
-                </div>
-                <div className="progress-track"><div className="h-full rounded-full bg-yellow-500" style={{ width: `${Math.min(approvalCount * 18, 100)}%` }} /></div>
               </div>
             </div>
             {visibleMenuItems.map((item) => {
@@ -709,10 +739,10 @@ export function OpsConsole() {
                 <button
                   key={item.key}
                   onClick={() => setActiveMenu(item.key)}
-                  className={`focus-ring inline-flex h-10 shrink-0 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition ${active ? "border border-blue-200 bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"}`}
+                  className={`focus-ring flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-bold transition sm:text-sm lg:gap-3 lg:px-3 ${active ? "bg-blue-600 text-white shadow-lg shadow-blue-100" : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"}`}
                 >
                   <Icon className="h-4 w-4" aria-hidden="true" />
-                  {item.label}
+                  <span className="whitespace-nowrap">{item.label}</span>
                 </button>
               );
             })}
@@ -737,7 +767,9 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} totalPrice={totalPrice} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} totalPrice={totalPrice} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} setEquipment={setEquipment} equipment={equipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "tablet" ? <TabletScreen tablet={tablet} setTablet={setTablet} createTabletRequest={createTabletRequest} role={role} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
                 <NasScreen 
@@ -823,10 +855,10 @@ function AuthPanel(props: {
 
 function Screen({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
   return (
-    <section className="grid gap-5">
+    <section className="grid gap-4 sm:gap-5">
       <div>
-        <h2 className="text-2xl font-bold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
+        <h2 className="text-xl font-black tracking-tight text-slate-900 sm:text-2xl">{title}</h2>
+        <p className="mt-1 text-xs text-slate-500 sm:text-sm">{desc}</p>
       </div>
       {children}
     </section>
@@ -900,7 +932,14 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
               </div>
               <h3 className="mt-4 text-sm font-bold">{module.name}</h3>
               <p className="mt-1 min-h-10 text-sm text-muted-foreground leading-relaxed">{module.description}</p>
-              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-4 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors">
+              <button onClick={() => {
+                const name = module.name;
+                if (name.includes("장비")) setActiveMenu("equipment");
+                else if (name.includes("A/S")) setActiveMenu("as");
+                else if (name.includes("NAS")) setActiveMenu("nas");
+                else if (name.includes("태블릿")) setActiveMenu("tablet");
+                else if (name.includes("부품")) setActiveMenu("parts");
+              }} className="focus-ring mt-4 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors">
                 모듈 열기
               </button>
             </article>
@@ -913,12 +952,14 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
 
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
   return (
-    <article className="surface-strong rounded-lg p-5">
+    <article className="surface-strong rounded-xl p-4 sm:p-5 shadow-sm border border-slate-50">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <Icon className="h-5 w-5 text-gray-500" aria-hidden="true" />
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider sm:text-sm">{label}</span>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-400 sm:h-9 sm:w-9">
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
+        </div>
       </div>
-      <strong className="mt-3 block text-3xl">{value}</strong>
+      <strong className="mt-2 block text-2xl font-black text-slate-900 sm:mt-4 sm:text-3xl">{value}</strong>
     </article>
   );
 }
@@ -1026,7 +1067,7 @@ function QueueTable(props: {
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead className="bg-slate-50/80 text-left text-xs uppercase text-slate-500">
             <tr><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
@@ -1063,6 +1104,34 @@ function QueueTable(props: {
           </tbody>
         </table>
       </div>
+      <div className="md:hidden divide-y divide-slate-100">
+        {props.items.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">요청이 없습니다.</div>
+        ) : (
+          props.items.map((item) => (
+            <div key={item.id} className="p-4 active:bg-slate-50 transition-colors" onClick={() => props.openDetail(item.id)}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-900 leading-tight truncate">{item.title}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-medium text-slate-500">
+                    <span className="text-blue-600">{item.module}</span>
+                    <span>{item.requester}</span>
+                    <span className={item.priority === "긴급" ? "text-rose-600 font-bold" : ""}>{item.priority}</span>
+                  </div>
+                </div>
+                <StatusPill status={item.status} />
+              </div>
+              <div className="mt-3 flex items-center justify-between text-[11px]">
+                <div className="flex items-center gap-1 text-slate-600">
+                  <span className="font-bold">담당:</span>
+                  <span>{item.owner}</span>
+                </div>
+                <div className="text-slate-400">{item.due}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </section>
   );
 }
@@ -1074,7 +1143,9 @@ function EquipmentScreen({
   config,
   setConfig,
   updateConfig,
-  totalPrice
+  totalPrice,
+  partsBasket,
+  setPartsBasket
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
@@ -1083,13 +1154,16 @@ function EquipmentScreen({
   setConfig: (config: EquipmentConfig) => void;
   updateConfig: (category: string, partId: string) => void;
   totalPrice: number;
+  partsBasket: any[];
+  setPartsBasket: (v: any[]) => void;
 }) {
-  const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
-  const basePrice = isCustomizable ? totalPrice : equipment.unitPrice;
-  const total = equipment.count * basePrice;
+  const isDesktop = equipment.item === "데스크톱";
+  const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
+  const basePrice = isDesktop ? totalPrice : equipment.unitPrice;
+  const total = (equipment.count * basePrice) + basketTotal;
 
   return (
-    <Screen title="장비 구매" desc="컴퓨터 장비는 필요한 성능 사양(CPU/RAM/SSD)을 직접 선택하여 최적화된 견적을 산출할 수 있습니다.">
+    <Screen title="장비 구매" desc="컴퓨터 장비 구매 요청을 작성합니다. 데스크탑은 세부 부품을 직접 구성할 수 있습니다.">
       <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <section className="surface-strong overflow-hidden rounded-2xl">
           <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
@@ -1098,7 +1172,9 @@ function EquipmentScreen({
             </div>
             <div>
               <h3 className="font-bold">장비 사양 및 요청서</h3>
-              <p className="text-sm text-slate-500">부품별 성능 설명을 확인하고 업무 유형에 맞는 구성을 선택하세요.</p>
+              <p className="text-sm text-slate-500">
+                {isDesktop ? "부품별 구성을 선택하여 조립 PC 견적을 완성하세요." : "구매하실 장비의 모델과 단가를 입력하세요."}
+              </p>
             </div>
           </div>
 
@@ -1118,12 +1194,15 @@ function EquipmentScreen({
               </select>
             </EquipmentRow>
 
-            {isCustomizable ? (
+            {isDesktop ? (
               <div className="bg-blue-50/30 p-5">
-                <h4 className="mb-4 text-sm font-bold text-blue-900">커스텀 사양 빌더</h4>
+                <div className="mb-4 flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-blue-900">🖥️ 본체 조립 사양</h4>
+                  <span className="text-xs font-bold text-blue-600">총 {totalPrice.toLocaleString()}원</span>
+                </div>
                 
                 <div className="mb-6">
-                  <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">빠른 구성 불러오기</p>
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-blue-400">프리셋 불러오기</p>
                   <div className="flex flex-wrap gap-2">
                     {equipmentPresets.map((preset) => (
                       <button
@@ -1140,13 +1219,13 @@ function EquipmentScreen({
 
                 <div className="grid gap-6">
                   {Object.keys(config.parts).map((category) => (
-                    <div key={category} className="grid gap-2 sm:grid-cols-[120px_1fr]">
-                      <span className="text-sm font-bold text-slate-600">{category}</span>
+                    <div key={category} className="grid gap-2 sm:grid-cols-[100px_1fr]">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase">{category}</span>
                       <div className="grid gap-2">
                         <select
                           value={config.parts[category] || ""}
                           onChange={(e) => updateConfig(category, e.target.value)}
-                          className="field w-full border-blue-200"
+                          className="field w-full border-blue-200 text-sm"
                         >
                           {equipmentParts
                             .filter((p) => p.category === category)
@@ -1157,54 +1236,81 @@ function EquipmentScreen({
                               </option>
                             ))}
                         </select>
-                        {config.parts[category] && (
-                          <p className="rounded-lg bg-white px-3 py-2 text-xs leading-relaxed text-blue-800 shadow-sm">
-                            <span className="font-bold">💡 활용 가이드:</span> {equipmentParts.find((p) => p.id === config.parts[category])?.performanceNote}
-                          </p>
-                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
-              <EquipmentRow label="단가">
-                <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full" placeholder="예상 단가" />
+              <EquipmentRow label="모델명 및 단가">
+                <div className="grid gap-3 md:grid-cols-2">
+                   <input value={equipment.item === "노트북" ? (equipment.userName ? `${equipment.userName}님 노트북` : "신규 노트북") : equipment.item} className="field w-full" readOnly disabled />
+                   <div className="relative">
+                      <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full pr-10" placeholder="대당 단가 입력" />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                   </div>
+                </div>
               </EquipmentRow>
             )}
 
+            {partsBasket.length > 0 && (
+              <div className="bg-slate-50 p-5">
+                <div className="mb-3 flex items-center justify-between">
+                   <h4 className="text-xs font-bold text-slate-800">📦 추가 구성품 (장바구니)</h4>
+                   <button onClick={() => setPartsBasket([])} className="text-[10px] font-bold text-rose-500 hover:underline">비우기</button>
+                </div>
+                <div className="space-y-2">
+                   {partsBasket.map((p) => (
+                     <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px]">
+                        <span className="font-medium text-slate-700">{p.name}</span>
+                        <span className="font-bold text-slate-900">{p.price.toLocaleString()}원</span>
+                     </div>
+                   ))}
+                </div>
+              </div>
+            )}
+
             <EquipmentRow label="수량">
-              <input type="number" min={1} value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field w-full" placeholder="수량" />
+              <div className="flex items-center gap-4">
+                 <input type="number" min={1} value={equipment.count} onChange={(event) => setEquipment({ ...equipment, count: Number(event.target.value) })} className="field w-40" />
+                 <span className="text-sm font-bold text-slate-400">대</span>
+              </div>
             </EquipmentRow>
 
             <EquipmentRow label="장비 사용자">
               <div className="grid gap-3 md:grid-cols-2">
-                <input value={equipment.userName} onChange={(event) => setEquipment({ ...equipment, userName: event.target.value })} className="field w-full" placeholder="사용자명 또는 부서" />
-                <input value={equipment.purpose} onChange={(event) => setEquipment({ ...equipment, purpose: event.target.value })} className="field w-full" placeholder="사용 목적" />
+                <input value={equipment.userName} onChange={(event) => setEquipment({ ...equipment, userName: event.target.value })} className="field w-full" placeholder="성함 또는 직함" />
+                <input value={equipment.purpose} onChange={(event) => setEquipment({ ...equipment, purpose: event.target.value })} className="field w-full" placeholder="사용 목적 (예: 상담실 업무용)" />
               </div>
             </EquipmentRow>
 
             <EquipmentRow label="기타 전달 사항">
-              <input value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="field w-full" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
+              <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="field min-h-[80px] w-full py-3" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
             </EquipmentRow>
           </div>
 
-          <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <p className="text-xs text-slate-500">대당 단가: {basePrice.toLocaleString()}원</p>
-              <p className={`mt-1 rounded-xl px-3 py-2 text-sm font-bold ${total > 500000 ? "bg-amber-100 text-amber-900" : "bg-blue-100 text-blue-900"}`}>
-                총 견적 {total.toLocaleString("ko-KR")}원
-              </p>
+          <div className="grid gap-4 border-t border-slate-200 bg-slate-50/50 px-5 py-6 md:grid-cols-[1fr_auto] md:items-center">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-500 uppercase">
+                  {isDesktop ? "본체" : "본체/본품"} {basePrice.toLocaleString()}원
+                </span>
+                {partsBasket.length > 0 && <span className="text-[10px] font-bold text-blue-600">+ 구성품 {basketTotal.toLocaleString()}원</span>}
+              </div>
+              <div className={`text-2xl font-black tracking-tighter ${(equipment.count >= 2 || basePrice >= 700000) ? "text-rose-600" : "text-blue-600"}`}>
+                <span className="mr-1 text-sm font-bold text-slate-400">총 견적</span>
+                {total.toLocaleString()}원
+              </div>
             </div>
             <button
               onClick={() => {
-                // If customizable, we should update the original equipment unitPrice before sending
-                if (isCustomizable) {
+                if (isDesktop) {
                   setEquipment({ ...equipment, unitPrice: basePrice });
                 }
                 createEquipment();
+                setPartsBasket([]);
               }}
-              className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white hover:bg-blue-700"
+              className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
             >
               <FilePlus2 className="h-4 w-4" aria-hidden="true" />
               구매 요청 생성
@@ -1213,25 +1319,27 @@ function EquipmentScreen({
         </section>
 
         <aside className="space-y-5">
-          <div className="surface-strong rounded-2xl p-5">
-            <h4 className="flex items-center gap-2 font-bold text-slate-800">
+          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h4 className="flex items-center gap-2 font-black text-slate-800 uppercase tracking-wider text-xs">
               <ShieldCheck className="h-4 w-4 text-blue-600" />
-              승인 가이드라인
+              결제 정책
             </h4>
-            <div className="mt-4 space-y-3 text-xs leading-5 text-slate-600">
-              <p>• <strong>50만원 이하:</strong> 학원 관리자 승인 후 즉시 구매 가능</p>
-              <p>• <strong>50만원 초과:</strong> 최고 관리자(회계팀) 추가 승인이 필요하며 평균 2~3일 소요됩니다.</p>
-              <p>• <strong>고성능 필수 직무:</strong> 영상 편집, 디자인, 서버 관리 등 명확한 이유 기재 시 승인이 원활합니다.</p>
+            <div className="mt-4 space-y-4 text-xs leading-relaxed text-slate-600">
+              <div className={`rounded-lg p-3 font-bold ${(equipment.count >= 2 || basePrice >= 700000) ? "bg-rose-50 text-rose-700 border border-rose-100" : "bg-blue-50 text-blue-700 border border-blue-100"}`}>
+                 {(equipment.count >= 2 || basePrice >= 700000) ? "⚠️ 고액 결제 대상: 경영지원팀 및 회계팀의 상세 검토가 진행됩니다." : "✅ 일반 결제 대상: 학원 관리자 승인 후 즉시 집행 가능합니다."}
+              </div>
+              <p>• <strong>단가 70만원 이상</strong> 또는 <strong>수량 2대 이상</strong>은 고액 결제로 분류됩니다.</p>
+              <p>• 사전에 다나와 등에서 실시간 최저가를 확인하여 단가를 입력하시면 승인이 더 빨라집니다.</p>
             </div>
           </div>
 
-          <div className="surface-strong rounded-2xl p-5">
-            <h4 className="flex items-center gap-2 font-bold text-slate-800">
+          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h4 className="flex items-center gap-2 font-black text-slate-800 uppercase tracking-wider text-xs">
               <Bot className="h-4 w-4 text-blue-600" />
-              AI 사양 추천
+              AI 진단 리포트
             </h4>
-            <div className="mt-4 rounded-xl bg-blue-50 p-4 text-xs text-blue-900">
-              {totalPrice > 1500000 ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-600 leading-relaxed">
+              {total > 1500000 ? (
                 <p>현재 구성은 <strong>[고성능]</strong> 등급입니다. 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
               ) : totalPrice > 750000 ? (
                 <p>현재 구성은 <strong>[표준]</strong> 등급입니다. 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
@@ -1527,7 +1635,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
     <section>
       <div className="grid gap-3">
         <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value })} className="field" aria-label="모듈">
-          <option>전산 장비</option><option>A/S</option><option>부품 구매</option><option>서블리</option><option>NAS</option>
+          <option>전산 장비</option><option>A/S</option><option>부품 구매</option><option>NAS</option>
         </select>
         <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="field" placeholder="요청 제목" />
         <div className="grid grid-cols-2 gap-2">
@@ -1727,15 +1835,15 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-          <h3 className="text-lg font-bold">{title}</h3>
-          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50" aria-label="닫기">
-            <X className="h-4 w-4" aria-hidden="true" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 sm:p-4 backdrop-blur-sm">
+      <div className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 shrink-0">
+          <h3 className="text-lg font-black tracking-tight text-slate-900">{title}</h3>
+          <button onClick={onClose} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="닫기">
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
-        <div className="max-h-[78vh] overflow-y-auto p-5">{children}</div>
+        <div className="overflow-y-auto p-5 pb-8 sm:p-6">{children}</div>
       </div>
       {confirmClose ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/30 p-4">
@@ -1786,3 +1894,302 @@ function AiHarness() {
   );
 }
 
+
+function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet: any; setTablet: (v: any) => void; createTabletRequest: () => void; role: UserRole }) {
+  const [tabletModels, setTabletModels] = useState(["Galaxy Tab S9", "Galaxy Tab S9 FE", "Galaxy Tab S9 Ultra", "Galaxy Tab A9+"]);
+  const [newModel, setNewModel] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Rental duration is fixed at 36 months
+  const fixedDuration = 36;
+  const unitPrice = 35000;
+  const totalRental = tablet.count * unitPrice * fixedDuration;
+
+  const addModel = () => {
+    if (newModel && !tabletModels.includes(newModel)) {
+      setTabletModels([...tabletModels, newModel]);
+      setNewModel("");
+    }
+  };
+
+  const removeModel = (m: string) => {
+    setTabletModels(tabletModels.filter(item => item !== m));
+  };
+
+  return (
+    <Screen title="태블릿 렌탈" desc="갤럭시 탭 중심의 수업용 태블릿 렌탈 신청을 관리합니다. (36개월 약정)">
+      <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <section className="surface-strong overflow-hidden rounded-2xl">
+          <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-600 text-white">
+                <PackageCheck className="h-5 w-5" aria-hidden="true" />
+             </div>
+             <div>
+                <h3 className="font-bold">렌탈 요청서</h3>
+                <p className="text-sm text-slate-500">36개월 고정 약정으로 최적 견적을 산출합니다.</p>
+             </div>
+          </div>
+          <div className="divide-y divide-slate-200">
+            <EquipmentRow label="학원/지점">
+               <input value={tablet.academy} onChange={(e) => setTablet({...tablet, academy: e.target.value})} className="field w-full" placeholder="손샘학원(본사)" />
+            </EquipmentRow>
+            <EquipmentRow label="모델">
+               <select value={tablet.model} onChange={(e) => setTablet({...tablet, model: e.target.value})} className="field w-full">
+                  {tabletModels.map(m => <option key={m}>{m}</option>)}
+               </select>
+            </EquipmentRow>
+            <EquipmentRow label="수량">
+               <input type="number" min={1} value={tablet.count} onChange={(e) => setTablet({...tablet, count: Number(e.target.value)})} className="field w-full" />
+            </EquipmentRow>
+            <EquipmentRow label="렌탈 기간">
+               <div className="field w-full bg-slate-50 font-bold text-slate-500">36개월 고정</div>
+            </EquipmentRow>
+            <EquipmentRow label="사용 용도">
+               <input value={tablet.purpose} onChange={(e) => setTablet({...tablet, purpose: e.target.value})} className="field w-full" placeholder="교재 열람, 테스트용 등" />
+            </EquipmentRow>
+            <EquipmentRow label="희망 수령일">
+               <input type="date" value={tablet.neededDate} onChange={(e) => setTablet({...tablet, neededDate: e.target.value})} className="field w-full" />
+            </EquipmentRow>
+          </div>
+          <div className="grid gap-4 border-t border-slate-200 bg-slate-50/50 px-5 py-6 md:grid-cols-[1fr_auto] md:items-center">
+             <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                   <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-500 uppercase">월 렌탈료 {unitPrice.toLocaleString()}원</span>
+                   <span className="text-xs font-bold text-slate-400">× 36개월 고정</span>
+                </div>
+                <div className="text-2xl font-black tracking-tighter text-amber-600">
+                   <span className="mr-1 text-sm font-bold text-slate-400">총 렌탈 예상액</span>
+                   {totalRental.toLocaleString()}원
+                </div>
+             </div>
+             <button onClick={() => {
+               setTablet({...tablet, duration: "36개월"});
+               createTabletRequest();
+             }} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 text-sm font-bold text-white hover:bg-amber-700 shadow-lg shadow-amber-100 transition-all">
+                <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                렌탈 요청 생성
+             </button>
+          </div>
+
+          {role === "super_admin" && (
+            <div className="border-t border-slate-200 bg-white p-5">
+              <button 
+                onClick={() => setShowSettings(!showSettings)}
+                className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-slate-600"
+              >
+                <UserCog className="h-3.5 w-3.5" />
+                관리자 모델 설정 {showSettings ? "닫기" : "열기"}
+              </button>
+              {showSettings && (
+                <div className="mt-4 space-y-4 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                  <div className="flex gap-2">
+                    <input 
+                      value={newModel} 
+                      onChange={(e) => setNewModel(e.target.value)} 
+                      className="field flex-1" 
+                      placeholder="추가할 새 모델명" 
+                    />
+                    <button onClick={addModel} className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white">추가</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {tabletModels.map(m => (
+                      <span key={m} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium">
+                        {m}
+                        <button onClick={() => removeModel(m)} className="text-rose-500 hover:text-rose-700"><X className="h-3 w-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+        <aside className="space-y-5">
+          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h4 className="flex items-center gap-2 font-black text-slate-800">
+               <ShieldCheck className="h-4 w-4 text-amber-600" />
+               렌탈 가이드라인
+            </h4>
+            <div className="mt-4 space-y-4 text-xs leading-relaxed text-slate-600">
+               <div className="rounded-lg bg-amber-50 p-3 font-bold text-amber-800 leading-normal">
+                 💡 태블릿 렌탈은 기본 36개월 약정을 원칙으로 합니다. 단, 계약 만료 전 협의를 통해 추가 연장 사용도 가능합니다.
+               </div>
+               <p>• <strong>연장 및 반납</strong>: 반납 1개월 전 담당자를 통해 연장 여부 확인이 필수이며, 미확인 시 자동 연장되거나 반납 절차가 진행될 수 있습니다.</p>
+               <p>• <strong>관리 의무</strong>: 렌탈 기간 중 파손/분실 시 사용자 과실에 따른 비용이 발생할 수 있으니 관리에 유의해 주세요.</p>
+               <p>• <strong>견적 유효성</strong>: 위 금액은 예상 렌탈료이며, 실제 발주 시점의 시장가 및 업체 사정에 따라 다소 변동될 수 있습니다.</p>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </Screen>
+  );
+}
+
+function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, partsBasket, setPartsBasket }: { addRequest: (r: any) => void; setActiveMenu: (m: MenuKey) => void; setEquipment: (v: any) => void; equipment: any; partsBasket: any[]; setPartsBasket: (v: any[]) => void }) {
+  const [partQuery, setPartQuery] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [partsList, setPartsList] = useState([
+    { name: "Logitech MX Master 3S", price: 129030, category: "마우스", danawaId: "17088194" },
+    { name: "Keychron K8 Pro (적축)", price: 154000, category: "키보드", danawaId: "17367330" },
+    { name: "HDMI 2.1 케이블 (3m)", price: 18500, category: "케이블", danawaId: "11984250" },
+    { name: "USB-C Hub (7-in-1)", price: 49000, category: "허브", danawaId: "10283451" },
+  ]);
+  
+  const filteredParts = partsList.filter(p => p.name.toLowerCase().includes(partQuery.toLowerCase()) || p.category.includes(partQuery));
+
+  const openDanawa = (query: string) => {
+    window.open(`https://search.danawa.com/mobile/dsearch.php?keyword=${encodeURIComponent(query)}`, "_blank");
+  };
+
+  const addToBasket = (part: any) => {
+    setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
+  };
+
+  const removeFromBasket = (id: number) => {
+    setPartsBasket(partsBasket.filter(p => p.id !== id));
+  };
+
+  const goToEquipment = () => {
+    const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
+    const basketNotes = partsBasket.map(p => `- ${p.name} (${p.price.toLocaleString()}원)`).join("\n");
+    
+    setEquipment({
+      ...equipment,
+      item: partsBasket.length === 1 ? partsBasket[0].name : "복합 부품/장비 구매",
+      unitPrice: basketTotal,
+      notes: `장바구니에서 추가됨:\n${basketNotes}\n${equipment.notes || ""}`
+    });
+    setActiveMenu("equipment");
+  };
+
+  const refreshPrices = () => {
+    setIsUpdating(true);
+    setTimeout(() => {
+      setPartsList(prev => prev.map(p => ({ ...p, price: p.price + (Math.random() > 0.5 ? 500 : -500) })));
+      setIsUpdating(false);
+    }, 1000);
+  };
+
+  const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
+
+  return (
+    <Screen title="부품 구매" desc="필요한 부품을 장바구니에 담아 통합 장비 견적을 내거나 개별 구매를 요청하세요.">
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <section className="surface-strong rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-100 h-fit">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex flex-1 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+               <Search className="h-5 w-5 text-slate-400" />
+               <input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} className="w-full bg-transparent text-sm font-medium outline-none" placeholder="부품명 또는 카테고리 검색" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={refreshPrices} disabled={isUpdating} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 transition-all active:scale-95 disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${isUpdating ? "animate-spin" : ""}`} />
+                최저가 갱신
+              </button>
+              <button onClick={() => openDanawa(partQuery || "컴퓨터 부품")} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-5 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-all active:scale-95">
+                <Search className="h-4 w-4" />
+                다나와 검색
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+             {filteredParts.length > 0 ? (
+               filteredParts.map(part => (
+                 <article key={part.name} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-5 transition-all hover:border-blue-200 hover:shadow-xl group">
+                    <div className="flex items-start justify-between">
+                       <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500 uppercase">{part.category}</span>
+                       <div className="flex flex-col items-end">
+                          <span className="text-sm font-black text-slate-900">{part.price.toLocaleString()}원</span>
+                          <span className="text-[9px] font-bold text-emerald-500 uppercase">Danawa Realtime</span>
+                       </div>
+                    </div>
+                    <h4 className="mt-4 text-sm font-extrabold text-slate-800 leading-tight grow">{part.name}</h4>
+                    
+                    <div className="mt-6 grid grid-cols-2 gap-2">
+                      <button onClick={() => openDanawa(part.name)} className="focus-ring flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition-all">
+                        <HardDrive className="h-3.5 w-3.5" />
+                        가격비교
+                      </button>
+                      <button onClick={() => addToBasket(part)} className="focus-ring flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-600 text-[11px] font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all">
+                        <PackageCheck className="h-3.5 w-3.5" />
+                        장바구니 담기
+                      </button>
+                    </div>
+                 </article>
+               ))
+             ) : (
+               <div className="col-span-full py-12 text-center text-slate-400">검색 결과가 없습니다.</div>
+             )}
+          </div>
+        </section>
+
+        <aside className="space-y-4">
+          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm sticky top-0">
+            <h4 className="flex items-center justify-between font-black text-slate-800">
+              <span className="flex items-center gap-2"><PackageCheck className="h-4 w-4 text-blue-600" /> 장바구니</span>
+              <span className="text-xs font-bold text-blue-600">{partsBasket.length}개</span>
+            </h4>
+            
+            <div className="mt-4 min-h-[100px] max-h-[300px] overflow-y-auto space-y-2 pr-2">
+              {partsBasket.length === 0 ? (
+                <p className="py-8 text-center text-[11px] font-medium text-slate-400">담긴 부품이 없습니다.</p>
+              ) : (
+                partsBasket.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl bg-white border border-slate-100 p-3 shadow-sm group">
+                    <div className="min-w-0">
+                      <p className="truncate text-[11px] font-bold text-slate-700">{p.name}</p>
+                      <p className="text-[10px] font-medium text-slate-400">{p.price.toLocaleString()}원</p>
+                    </div>
+                    <button onClick={() => removeFromBasket(p.id)} className="h-6 w-6 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold text-slate-500">합계 금액</span>
+                <span className="text-lg font-black text-blue-600">{basketTotal.toLocaleString()}원</span>
+              </div>
+              
+              <button 
+                onClick={goToEquipment}
+                disabled={partsBasket.length === 0}
+                className="focus-ring flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-bold text-white hover:bg-black transition-all shadow-xl disabled:opacity-30"
+              >
+                장비 견적에 추가
+                <ArrowRight className="h-4 w-4" />
+              </button>
+              
+              <button 
+                onClick={() => {
+                  partsBasket.forEach(p => addRequest({
+                    module: "부품 구매",
+                    title: `${p.name} 구매 요청`,
+                    requester: "전산팀",
+                    owner: "경영지원",
+                    status: "접수",
+                    priority: "보통",
+                    due: "이번 주",
+                    audit: "다나와 최저가 기반 견적",
+                    description: `부품: ${p.name}\n실시간 최저가: ${p.price.toLocaleString()}원`,
+                    amount: `1개 / ${p.price.toLocaleString()}원`,
+                    source: "admin_console"
+                  }));
+                  setPartsBasket([]);
+                }}
+                disabled={partsBasket.length === 0}
+                className="mt-2 flex h-10 w-full items-center justify-center text-[11px] font-bold text-slate-400 hover:text-slate-600"
+              >
+                장바구니 전체 단독 구매 요청
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </Screen>
+  );
+}

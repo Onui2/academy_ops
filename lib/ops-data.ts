@@ -5,6 +5,7 @@ import {
   HardDrive,
   Headphones,
   PackageCheck,
+  Search,
   ShieldCheck
 } from "lucide-react";
 import type { EquipmentPart, EquipmentPreset, ModuleSummary, NasMetric, WorkItem } from "@/types/ops";
@@ -30,6 +31,20 @@ export const modules: ModuleSummary[] = [
     count: 3,
     icon: HardDrive,
     tone: "bg-emerald-50 text-emerald-700"
+  },
+  {
+    name: "태블릿 렌탈",
+    description: "대여 요청, 견적 확인, 배송 추적",
+    count: 5,
+    icon: PackageCheck,
+    tone: "bg-amber-50 text-amber-700"
+  },
+  {
+    name: "부품 구매",
+    description: "키보드, 마우스, 소모품 간편 신청",
+    count: 14,
+    icon: Search,
+    tone: "bg-slate-50 text-slate-700"
   }
 ];
 
