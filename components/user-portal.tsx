@@ -129,13 +129,33 @@ export function UserPortal() {
   }, [loadHistory]);
 
   useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("user_portal_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ops_requests" },
+        () => {
+          void loadHistory();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, loadHistory]);
+
+  useEffect(() => {
     if (draft.category === "as" && symptomQuery.length > 1) {
-      const match = dbFaqs.find(f => symptomQuery.toLowerCase().includes(f.keyword.toLowerCase()));
+      // Mapping question to keyword for UI compatibility
+      const match = dbFaqs.find(f => symptomQuery.toLowerCase().includes((f as any).question?.toLowerCase() || ""));
       if (match) {
         setDiagnosis({
-          diagnosis: match.category === "network" ? "네트워크 장애" : match.category === "device" ? "기기 결함" : "시스템 오류",
+          diagnosis: match.category === "영상장비" ? "영상 장비 장애" : match.category === "네트워크" ? "네트워크 장애" : "시스템 오류",
           solution: match.answer.split(", "),
-          original: match
+          original: { ...match, keyword: (match as any).question } as any
         });
       } else {
         setDiagnosis(null);

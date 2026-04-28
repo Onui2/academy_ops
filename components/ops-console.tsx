@@ -331,7 +331,7 @@ export function OpsConsole() {
       }
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ?? null;
       setUser(nextUser);
       if (nextUser) {
@@ -342,9 +342,24 @@ export function OpsConsole() {
       }
     });
 
+    // Realtime subscription for ops_requests
+    const channel = supabase
+      .channel("ops_requests_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ops_requests" },
+        () => {
+          if (user) {
+            void loadDbRequests(user);
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       alive = false;
-      data.subscription.unsubscribe();
+      authListener.subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [supabase, loadDbRequests]);
 
