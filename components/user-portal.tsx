@@ -41,7 +41,7 @@ const categories = [
   {
     id: "equipment" as const,
     title: "장비가 필요해요",
-    desc: "노트북, 데스크톱, 모니터, 태블릿, 네트워크/NAS",
+    desc: "노트북, 데스크톱, 소모품, 모니터, 네트워크/NAS",
     icon: Laptop,
     tone: "bg-blue-50 text-blue-700"
   },
@@ -580,7 +580,6 @@ export function UserPortal() {
                         <option>노트북</option>
                         <option>데스크톱</option>
                         <option>모니터</option>
-                        <option>태블릿</option>
                         <option>네트워크/NAS</option>
                         <option>소모품/주변기기</option>
                         <option>기타 장비</option>
