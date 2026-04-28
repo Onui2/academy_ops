@@ -120,8 +120,8 @@ const asFaqCategories = [
 
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
-    category: "equipment",
-    requestItem: "데스크톱",
+    category: "other",
+    requestItem: undefined,
     title: "",
     academy: "",
     detail: "",
@@ -622,7 +622,7 @@ export function UserPortal() {
                     </select>
                   </div>
 
-                  {(draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") && (
+                  {(draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기")) && (
                     <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
