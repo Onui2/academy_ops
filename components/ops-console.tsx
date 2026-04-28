@@ -1028,18 +1028,16 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
             <h3 className="text-lg font-bold">주간 운영 요청 추이</h3>
             <span className="text-xs font-semibold text-slate-500">최근 7일</span>
           </div>
-          <div className="flex h-48 items-end gap-2 px-2">
+          <div className="flex h-56 items-end gap-3 px-2">
             {[45, 62, 58, 85, 72, 90, 65].map((height, i) => (
               <div key={i} className="group relative flex flex-1 flex-col items-center gap-2">
+                <span className="text-[11px] font-black text-slate-900 mb-1">{height}</span>
                 <div 
-                  className="w-full rounded-t-lg bg-blue-100 transition-all duration-500 hover:bg-blue-600" 
-                  style={{ height: `${height}%` }}
+                  className="w-full rounded-t-lg bg-gradient-to-t from-blue-600 to-blue-400 transition-all duration-500 hover:from-blue-500 hover:to-blue-300 shadow-sm" 
+                  style={{ height: `${(height / 90) * 100}%` }}
                 >
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded bg-slate-800 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                    {height}건
-                  </div>
                 </div>
-                <span className="text-[10px] font-bold text-slate-400">{["월", "화", "수", "목", "금", "토", "일"][i]}</span>
+                <span className="text-[11px] font-bold text-slate-500 mt-1">{["월", "화", "수", "목", "금", "토", "일"][i]}</span>
               </div>
             ))}
           </div>
