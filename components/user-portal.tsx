@@ -134,6 +134,7 @@ export function UserPortal() {
   const [partsBasket, setPartsBasket] = useState<BasketItem[]>([]);
   const [partQuery, setPartQuery] = useState("");
   const [selectedPartCategory, setSelectedPartCategory] = useState<string | null>(null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     if (supabase) {
@@ -230,6 +231,9 @@ export function UserPortal() {
       if (catObj) {
         result = result.filter((p) => catObj.items.includes(p.category));
       }
+    }
+    if (selectedSubCategory) {
+      result = result.filter((p) => p.category === selectedSubCategory);
     }
     if (partQuery) {
       result = result.filter(
@@ -574,8 +578,13 @@ export function UserPortal() {
                       <select value={draft.requestItem ?? "데스크톱"} onChange={(event) => {
                         const val = event.target.value;
                         setDraft({ ...draft, requestItem: val });
-                        if (val === "데스크톱") setSelectedPartCategory("PC");
-                        else setSelectedPartCategory(null);
+                        if (val === "데스크톱") {
+                          setSelectedPartCategory("PC");
+                          setSelectedSubCategory("CPU");
+                        } else {
+                          setSelectedPartCategory(null);
+                          setSelectedSubCategory(null);
+                        }
                       }} className="field" aria-label="장비 종류">
                         <option>노트북</option>
                         <option>데스크톱</option>
@@ -604,19 +613,29 @@ export function UserPortal() {
                             <><PackageCheck className="h-4 w-4 text-blue-600" /> 소모품 및 주변기기 선택</>
                           )}
                         </h4>
-                        {draft.requestItem === "소모품/주변기기" && (
-                          <div className="flex gap-1">
-                            {partsCategories.map((cat) => (
+                        <div className="flex flex-wrap gap-1">
+                          {draft.requestItem === "데스크톱" ? (
+                            partsCategories.find(c => c.id === "PC")?.items.map((sub) => (
+                              <button
+                                key={sub}
+                                onClick={() => setSelectedSubCategory(selectedSubCategory === sub ? null : sub)}
+                                className={`rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all ${selectedSubCategory === sub ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+                              >
+                                {sub}
+                              </button>
+                            ))
+                          ) : draft.requestItem === "소모품/주변기기" ? (
+                            partsCategories.map((cat) => (
                               <button
                                 key={cat.id}
                                 onClick={() => setSelectedPartCategory(selectedPartCategory === cat.id ? null : cat.id)}
-                                className={`rounded-lg px-3 py-1 text-[10px] font-bold transition-all ${selectedPartCategory === cat.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+                                className={`rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all ${selectedPartCategory === cat.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
                               >
                                 {cat.name}
                               </button>
-                            ))}
-                          </div>
-                        )}
+                            ))
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
