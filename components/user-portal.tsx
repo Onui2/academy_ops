@@ -251,10 +251,11 @@ export function UserPortal() {
   }, [draft.category]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
   const estimatedOwner = draft.category === "nas" ? "NAS 관리자" : draft.category === "as" ? "전산" : "학원 관리자";
+  const defaultTitle = ["equipment", "as"].includes(draft.category) ? selected.title : `${selected.title} 요청`;
 
   const submit = async () => {
-    if (!draft.title.trim()) return;
     if (draft.urgency === "긴급" && !draft.urgentReason.trim()) return;
+    const finalTitle = draft.title.trim() || defaultTitle;
 
     setIsLoading(true);
 
@@ -276,7 +277,7 @@ export function UserPortal() {
       if (existing) {
         const updated: WorkItem = {
           ...existing,
-          title: draft.title,
+          title: finalTitle,
           requester: draft.academy,
           status: "접수", // Resubmitting resets to initial status
           priority,
@@ -297,7 +298,7 @@ export function UserPortal() {
       const item: WorkItem = {
         id: makeRequestId(),
         module: categoryToModule(draft.category),
-        title: draft.title,
+        title: finalTitle,
         requester: draft.academy,
         owner: "학원 관리자",
         status: "접수",
@@ -319,7 +320,7 @@ export function UserPortal() {
         if (draft.category === "nas") {
           await createNasPermissionRequest(supabase, {
             user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? user.email ?? "unknown@academy.local",
-            resource_name: draft.title || "공용 NAS",
+            resource_name: finalTitle,
             permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
             requested_by: user.id
           });
@@ -674,7 +675,7 @@ export function UserPortal() {
             <div className="mt-4 grid gap-3">
               <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                 <p className="text-[11px] font-bold text-slate-400">제목 미리보기</p>
-                <p className="mt-1 text-sm font-black text-slate-900">{draft.title.trim() || `${selected.title} 요청`}</p>
+                <p className="mt-1 text-sm font-black text-slate-900">{draft.title.trim() || defaultTitle}</p>
               </div>
               <div className="grid gap-3">
                 <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
