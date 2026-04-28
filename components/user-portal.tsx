@@ -41,7 +41,7 @@ const categories = [
   {
     id: "equipment" as const,
     title: "장비가 필요해요",
-    desc: "노트북, 데스크톱, 모니터, 태블릿, 네트워크/NAS",
+    desc: "노트북, 데스크톱, 소모품, 태블릿, 네트워크/NAS",
     icon: Laptop,
     tone: "bg-blue-50 text-blue-700"
   },
@@ -65,13 +65,6 @@ const categories = [
     desc: "신규 대여, 연장, 반납 요청",
     icon: Laptop,
     tone: "bg-purple-50 text-purple-700"
-  },
-  {
-    id: "parts" as const,
-    title: "소모품 구매",
-    desc: "마우스, 키보드, 각종 소모품 견적 및 요청",
-    icon: Search,
-    tone: "bg-orange-50 text-orange-700"
   },
   {
     id: "other" as const,
@@ -282,9 +275,11 @@ export function UserPortal() {
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
-    if (draft.category === "equipment") return "장비 종류를 선택해서 운영팀 요청 큐로 바로 접수할 수 있어요.";
+    if (draft.category === "equipment") {
+      if (draft.requestItem === "소모품/주변기기") return "필요한 부품을 장바구니에 담아 한 번에 요청할 수 있습니다.";
+      return "장비 종류를 선택해서 운영팀 요청 큐로 바로 접수할 수 있어요.";
+    }
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
-    if (draft.category === "parts") return "필요한 부품을 장바구니에 담아 한 번에 요청할 수 있습니다.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
@@ -308,11 +303,11 @@ export function UserPortal() {
       draft.category === "equipment" && draft.requestItem ? `요청 장비: ${draft.requestItem}` : "",
       draft.category === "tablet" ? `처리 유형: ${draft.title.includes("연장") ? "연장" : draft.title.includes("반납") ? "반납" : "신규"}\n${draft.detail}` : draft.detail,
       draft.category === "nas" ? "안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다." : "",
-      draft.category === "parts" ? `요청 부품 목록:\n${basketDesc}\n\n합계: ${basketTotal.toLocaleString()}원` : "",
+      draft.requestItem === "소모품/주변기기" ? `요청 부품 목록:\n${basketDesc}\n\n합계: ${basketTotal.toLocaleString()}원` : "",
       files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
     ].filter(Boolean).join("\n");
 
-    const amount = draft.category === "parts" ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
+    const amount = draft.requestItem === "소모품/주변기기" ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
 
     let resultItem: WorkItem | null = null;
 
@@ -341,7 +336,7 @@ export function UserPortal() {
     } else {
       const item: WorkItem = {
         id: makeRequestId(),
-        module: categoryToModule(draft.category),
+        module: categoryToModule(draft.category, draft.requestItem),
         title: finalTitle,
         requester: draft.academy,
         owner: "학원 관리자",
@@ -570,8 +565,22 @@ export function UserPortal() {
                     ) : null}
                   </div>
                 </div>
-              ) : draft.category === "parts" ? (
+              ) : draft.category === "equipment" && draft.requestItem === "소모품/주변기기" ? (
                 <div className="mt-4 space-y-6">
+                  {/* Item Switcher within Equipment */}
+                  <div className="flex items-center gap-3">
+                    <select value={draft.requestItem ?? "데스크톱"} onChange={(event) => setDraft({ ...draft, requestItem: event.target.value })} className="field max-w-[200px]" aria-label="장비 종류">
+                      <option>노트북</option>
+                      <option>데스크톱</option>
+                      <option>모니터</option>
+                      <option>태블릿</option>
+                      <option>네트워크/NAS</option>
+                      <option>소모품/주변기기</option>
+                      <option>기타 장비</option>
+                    </select>
+                    <p className="text-sm text-slate-500">장비 종류를 변경하려면 선택하세요.</p>
+                  </div>
+
                   {/* Category Grid */}
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     {partsCategories.map((cat) => {
@@ -643,6 +652,7 @@ export function UserPortal() {
                         <option>모니터</option>
                         <option>태블릿</option>
                         <option>네트워크/NAS</option>
+                        <option>소모품/주변기기</option>
                         <option>기타 장비</option>
                       </select>
                     ) : null}
@@ -796,7 +806,7 @@ export function UserPortal() {
                 </div>
               </div>
 
-              {draft.category === "parts" && partsBasket.length > 0 && (
+              {draft.requestItem === "소모품/주변기기" && partsBasket.length > 0 && (
                 <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
                   <h4 className="flex items-center justify-between text-[11px] font-black text-slate-400 uppercase">
                     장바구니 <span>{partsBasket.length}</span>
@@ -880,12 +890,14 @@ export function UserPortal() {
   );
 }
 
-function categoryToModule(category: Category) {
-  if (category === "equipment") return "전산 장비";
+function categoryToModule(category: Category, requestItem?: string) {
+  if (category === "equipment") {
+    if (requestItem === "소모품/주변기기") return "부품 구매";
+    return "전산 장비";
+  }
   if (category === "as") return "A/S";
   if (category === "nas") return "NAS";
   if (category === "tablet") return "태블릿";
-  if (category === "parts") return "부품 구매";
   return "기타";
 }
 
