@@ -12,6 +12,7 @@ import {
   Filter,
   FolderOpen,
   HardDrive,
+  Headphones,
   Home,
   LogOut,
   PackageCheck,
@@ -2043,19 +2044,32 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
 
 function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, partsBasket, setPartsBasket }: { addRequest: (r: any) => void; setActiveMenu: (m: MenuKey) => void; setEquipment: (v: any) => void; equipment: any; partsBasket: any[]; setPartsBasket: (v: any[]) => void }) {
   const [partQuery, setPartQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [partsList, setPartsList] = useState([
-    { name: "Logitech MX Master 3S", price: 129030, category: "마우스", danawaId: "17088194" },
-    { name: "Keychron K8 Pro (적축)", price: 154000, category: "키보드", danawaId: "17367330" },
-    { name: "HDMI 2.1 케이블 (3m)", price: 18500, category: "케이블", danawaId: "11984250" },
-    { name: "USB-C Hub (7-in-1)", price: 49000, category: "허브", danawaId: "10283451" },
-  ]);
   
-  const filteredParts = partsList.filter(p => p.name.toLowerCase().includes(partQuery.toLowerCase()) || p.category.includes(partQuery));
+  const categories = [
+    { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
+    { id: "Input", name: "주변기기", icon: Headphones, items: ["Keyboard", "Mouse"] },
+    { id: "Cable", name: "케이블/허브", icon: Search, items: ["Cables"] },
+    { id: "Supply", name: "사무 소모품", icon: ClipboardList, items: ["Consumables"] }
+  ];
 
-  const openDanawa = (query: string) => {
-    window.open(`https://search.danawa.com/mobile/dsearch.php?keyword=${encodeURIComponent(query)}`, "_blank");
-  };
+  const filteredItems = useMemo(() => {
+    let result = equipmentParts;
+    if (selectedCategory) {
+      const catObj = categories.find(c => c.id === selectedCategory);
+      if (catObj) {
+        result = result.filter(p => catObj.items.includes(p.category));
+      }
+    }
+    if (partQuery) {
+      result = result.filter(p => 
+        p.name.toLowerCase().includes(partQuery.toLowerCase()) || 
+        p.category.toLowerCase().includes(partQuery.toLowerCase())
+      );
+    }
+    return result;
+  }, [selectedCategory, partQuery]);
 
   const addToBasket = (part: any) => {
     setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
@@ -2067,142 +2081,138 @@ function PartsScreen({ addRequest, setActiveMenu, setEquipment, equipment, parts
 
   const goToEquipment = () => {
     const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
-    const basketNotes = partsBasket.map(p => `- ${p.name} (${p.price.toLocaleString()}원)`).join("\n");
-    
-    setEquipment({
-      ...equipment,
-      item: partsBasket.length === 1 ? partsBasket[0].name : "복합 부품/장비 구매",
-      unitPrice: basketTotal,
-      notes: `장바구니에서 추가됨:\n${basketNotes}\n${equipment.notes || ""}`
-    });
     setActiveMenu("equipment");
   };
 
-  const refreshPrices = () => {
-    setIsUpdating(true);
-    setTimeout(() => {
-      setPartsList(prev => prev.map(p => ({ ...p, price: p.price + (Math.random() > 0.5 ? 500 : -500) })));
-      setIsUpdating(false);
-    }, 1000);
+  const openDanawa = (query: string) => {
+    window.open(`https://search.danawa.com/mobile/dsearch.php?keyword=${encodeURIComponent(query)}`, "_blank");
   };
 
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
 
   return (
-    <Screen title="부품 구매" desc="필요한 부품을 장바구니에 담아 통합 장비 견적을 내거나 개별 구매를 요청하세요.">
+    <Screen title="소모품·주변기기" desc="카테고리별로 필요한 부품을 담아 견적을 내거나 장비 구매에 추가하세요.">
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <section className="surface-strong rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-100 h-fit">
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex flex-1 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-               <Search className="h-5 w-5 text-slate-400" />
-               <input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} className="w-full bg-transparent text-sm font-medium outline-none" placeholder="부품명 또는 카테고리 검색" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={refreshPrices} disabled={isUpdating} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 transition-all active:scale-95 disabled:opacity-50">
-                <RefreshCw className={`h-4 w-4 ${isUpdating ? "animate-spin" : ""}`} />
-                최저가 갱신
-              </button>
-              <button onClick={() => openDanawa(partQuery || "컴퓨터 부품")} className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-5 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-all active:scale-95">
-                <Search className="h-4 w-4" />
-                다나와 검색
-              </button>
-            </div>
+        <div className="space-y-6">
+          {/* Category Cards */}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {categories.map((cat) => {
+              const Icon = cat.icon;
+              const active = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(active ? null : cat.id)}
+                  className={`flex flex-col items-start rounded-2xl border p-5 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-lg shadow-blue-100" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-md"}`}
+                >
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h4 className={`mt-4 font-black ${active ? "text-blue-900" : "text-slate-800"}`}>{cat.name}</h4>
+                  <p className="mt-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">{cat.items.length} CATEGORIES</p>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-             {filteredParts.length > 0 ? (
-               filteredParts.map(part => (
-                 <article key={part.name} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-5 transition-all hover:border-blue-200 hover:shadow-xl group">
+          <section className="surface-strong rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-100">
+            <div className="mb-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+               <Search className="h-5 w-5 text-slate-400" />
+               <input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} className="w-full bg-transparent text-sm font-medium outline-none" placeholder="부품명 또는 모델 검색" />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+               {filteredItems.map(part => (
+                 <article key={part.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-4 transition-all hover:border-blue-200 hover:shadow-lg group">
                     <div className="flex items-start justify-between">
                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500 uppercase">{part.category}</span>
-                       <div className="flex flex-col items-end">
-                          <span className="text-sm font-black text-slate-900">{part.price.toLocaleString()}원</span>
-                          <span className="text-[9px] font-bold text-emerald-500 uppercase">Danawa Realtime</span>
-                       </div>
+                       <span className="text-sm font-black text-slate-900">{part.price.toLocaleString()}원</span>
                     </div>
-                    <h4 className="mt-4 text-sm font-extrabold text-slate-800 leading-tight grow">{part.name}</h4>
+                    <h4 className="mt-3 text-sm font-extrabold text-slate-800 leading-tight grow">{part.name}</h4>
+                    <p className="mt-1 text-[11px] text-slate-500">{part.description}</p>
                     
-                    <div className="mt-6 grid grid-cols-2 gap-2">
-                      <button onClick={() => openDanawa(part.name)} className="focus-ring flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition-all">
-                        <HardDrive className="h-3.5 w-3.5" />
-                        가격비교
+                    <div className="mt-4 flex gap-2">
+                      <button onClick={() => openDanawa(part.name)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50 transition-all">
+                        다나와
                       </button>
-                      <button onClick={() => addToBasket(part)} className="focus-ring flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-600 text-[11px] font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all">
-                        <PackageCheck className="h-3.5 w-3.5" />
-                        장바구니 담기
+                      <button onClick={() => addToBasket(part)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 text-[11px] font-bold text-white hover:bg-blue-700 transition-all">
+                        담기
                       </button>
                     </div>
                  </article>
-               ))
-             ) : (
-               <div className="col-span-full py-12 text-center text-slate-400">검색 결과가 없습니다.</div>
-             )}
-          </div>
-        </section>
+               ))}
+               {filteredItems.length === 0 && (
+                 <div className="col-span-full py-12 text-center text-slate-400 font-medium">검색 결과가 없습니다.</div>
+               )}
+            </div>
+          </section>
+        </div>
 
         <aside className="space-y-4">
-          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm sticky top-0">
+          <div className="surface-strong rounded-2xl p-5 border border-slate-100 shadow-sm sticky top-[100px]">
             <h4 className="flex items-center justify-between font-black text-slate-800">
               <span className="flex items-center gap-2"><PackageCheck className="h-4 w-4 text-blue-600" /> 장바구니</span>
-              <span className="text-xs font-bold text-blue-600">{partsBasket.length}개</span>
+              <span className="text-xs font-bold text-blue-600">{partsBasket.length}</span>
             </h4>
             
-            <div className="mt-4 min-h-[100px] max-h-[300px] overflow-y-auto space-y-2 pr-2">
+            <div className="mt-4 min-h-[100px] max-h-[400px] overflow-y-auto space-y-2 pr-2">
               {partsBasket.length === 0 ? (
-                <p className="py-8 text-center text-[11px] font-medium text-slate-400">담긴 부품이 없습니다.</p>
+                <p className="py-8 text-center text-[11px] font-medium text-slate-400">비어있음</p>
               ) : (
                 partsBasket.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl bg-white border border-slate-100 p-3 shadow-sm group">
+                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 group">
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-bold text-slate-700">{p.name}</p>
                       <p className="text-[10px] font-medium text-slate-400">{p.price.toLocaleString()}원</p>
                     </div>
-                    <button onClick={() => removeFromBasket(p.id)} className="h-6 w-6 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
-                      <X className="h-3 w-3" />
+                    <button onClick={() => removeFromBasket(p.id)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="mt-4 border-t border-slate-100 pt-4">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-bold text-slate-500">합계 금액</span>
-                <span className="text-lg font-black text-blue-600">{basketTotal.toLocaleString()}원</span>
+            {partsBasket.length > 0 && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold text-slate-500">합계</span>
+                  <span className="text-lg font-black text-blue-600">{basketTotal.toLocaleString()}원</span>
+                </div>
+                
+                <button 
+                  onClick={goToEquipment}
+                  className="focus-ring flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-bold text-white hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
+                >
+                  장비 구매로 이동
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    const desc = partsBasket.map(p => `- ${p.name}: ${p.price.toLocaleString()}원`).join("\n");
+                    addRequest({
+                      module: "부품 구매",
+                      title: `${partsBasket[0].name} 외 ${partsBasket.length - 1}건 소모품 구매`,
+                      requester: "경영지원",
+                      owner: "경영지원",
+                      status: "접수",
+                      priority: "보통",
+                      due: "이번 주",
+                      audit: "장바구니 통합 요청",
+                      description: `요청 부품 목록:\n${desc}`,
+                      amount: `총 ${partsBasket.length}종 / ${basketTotal.toLocaleString()}원`,
+                      source: "admin_console"
+                    });
+                    setPartsBasket([]);
+                    addToast("소모품 구매 요청이 접수되었습니다.", "success");
+                  }}
+                  className="mt-3 flex h-10 w-full items-center justify-center text-[10px] font-bold text-slate-400 hover:text-slate-600"
+                >
+                  단독 구매 요청하기
+                </button>
               </div>
-              
-              <button 
-                onClick={goToEquipment}
-                disabled={partsBasket.length === 0}
-                className="focus-ring flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-bold text-white hover:bg-black transition-all shadow-xl disabled:opacity-30"
-              >
-                장비 견적에 추가
-                <ArrowRight className="h-4 w-4" />
-              </button>
-              
-              <button 
-                onClick={() => {
-                  partsBasket.forEach(p => addRequest({
-                    module: "부품 구매",
-                    title: `${p.name} 구매 요청`,
-                    requester: "전산팀",
-                    owner: "경영지원",
-                    status: "접수",
-                    priority: "보통",
-                    due: "이번 주",
-                    audit: "다나와 최저가 기반 견적",
-                    description: `부품: ${p.name}\n실시간 최저가: ${p.price.toLocaleString()}원`,
-                    amount: `1개 / ${p.price.toLocaleString()}원`,
-                    source: "admin_console"
-                  }));
-                  setPartsBasket([]);
-                }}
-                disabled={partsBasket.length === 0}
-                className="mt-2 flex h-10 w-full items-center justify-center text-[11px] font-bold text-slate-400 hover:text-slate-600"
-              >
-                장바구니 전체 단독 구매 요청
-              </button>
-            </div>
+            )}
           </div>
         </aside>
       </div>

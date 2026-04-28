@@ -151,7 +151,23 @@ export const equipmentParts: EquipmentPart[] = [
 
   // Monitor
   { id: "mon-1", category: "Monitor", name: "24인치 FHD 75Hz", price: 140000, description: "표준 사무용", performanceNote: "가장 보편적인 업무용 사이즈입니다.", tier: "기본" },
-  { id: "mon-2", category: "Monitor", name: "27인치 QHD 144Hz", price: 320000, description: "고해상도", performanceNote: "화면이 넓어 엑셀이나 문서를 두 개 띄우기 좋습니다.", tier: "업무용" }
+  { id: "mon-2", category: "Monitor", name: "27인치 QHD 144Hz", price: 320000, description: "고해상도", performanceNote: "화면이 넓어 엑셀이나 문서를 두 개 띄우기 좋습니다.", tier: "업무용" },
+
+  // Keyboard
+  { id: "kb-1", category: "Keyboard", name: "무소음 무선 키보드", price: 35000, description: "행정 업무용", performanceNote: "조용한 사무실 환경에 적합합니다.", tier: "업무용" },
+  { id: "kb-2", category: "Keyboard", name: "기계식 갈축 키보드", price: 85000, description: "고급 입력 장치", performanceNote: "장시간 타이핑 시 피로도가 적습니다.", tier: "고성능" },
+
+  // Mouse
+  { id: "ms-1", category: "Mouse", name: "무선 광마우스", price: 15000, description: "표준 사무용", performanceNote: "가볍고 끊김 없는 연결을 지원합니다.", tier: "기본" },
+  { id: "ms-2", category: "Mouse", name: "버티컬 인체공학 마우스", price: 45000, description: "손목 보호용", performanceNote: "장시간 PC 사용 시 손목 부담을 줄여줍니다.", tier: "업무용" },
+
+  // Cables/Adapters
+  { id: "cb-1", category: "Cables", name: "HDMI to HDMI (2m)", price: 8000, description: "영상 연결용", performanceNote: "고해상도 4K 출력을 지원합니다.", tier: "기본" },
+  { id: "cb-2", category: "Cables", name: "USB-C 멀티 허브 (7 in 1)", price: 55000, description: "노트북 확장용", performanceNote: "노트북에 다양한 주변기기를 한 번에 연결합니다.", tier: "업무용" },
+
+  // Consumables
+  { id: "con-1", category: "Consumables", name: "A4 복사용지 (1Box)", price: 25000, description: "표준 복사용지", performanceNote: "걸림이 적고 인쇄 품질이 우수합니다.", tier: "소모품" },
+  { id: "con-2", category: "Consumables", name: "검정 토너 카트리지 (HP)", price: 95000, description: "정품 토너", performanceNote: "고품질 인쇄와 긴 수명을 보장합니다.", tier: "소모품" }
 ];
 
 export const equipmentPresets: EquipmentPreset[] = [
