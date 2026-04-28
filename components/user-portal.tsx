@@ -2,13 +2,13 @@
 
 import {
   ArrowRight,
+  Bot,
   CheckCircle2,
   HardDrive,
   HelpCircle,
   Laptop,
   Megaphone,
   Paperclip,
-  Printer,
   Search,
   ShieldCheck,
   Wrench
@@ -16,11 +16,11 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
 import { equipmentParts, equipmentPresets } from "@/lib/ops-data";
 import type { EquipmentConfig, WorkItem, WorkPriority } from "@/types/ops";
 
-type Category = "equipment" | "as" | "software" | "network" | "subly" | "nas" | "other";
+type Category = "equipment" | "as" | "software" | "network" | "subly" | "nas" | "tablet" | "other";
 
 type RequestDraft = {
   category: Category;
@@ -56,6 +56,13 @@ const categories = [
     tone: "bg-emerald-50 text-emerald-700"
   },
   {
+    id: "tablet" as const,
+    title: "태블릿 렌탈",
+    desc: "신규 대여, 연장, 반납 요청",
+    icon: Laptop,
+    tone: "bg-purple-50 text-purple-700"
+  },
+  {
     id: "other" as const,
     title: "잘 모르겠어요",
     desc: "운영팀이 분류해서 처리",
@@ -64,14 +71,14 @@ const categories = [
   }
 ];
 
+const adminStorageKey = "academy-ops-hub-state-v2";
+
 const samples = [
   "3층 빔프로젝터 화면이 깜박여요",
   "신규 선생님 NAS 접속 권한이 필요해요",
   "강의실 노트북 2대가 더 필요해요",
   "모니터가 갑자기 안 나와요"
 ];
-
-const adminStorageKey = "academy-ops-hub-state-v2";
 
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
@@ -88,14 +95,17 @@ export function UserPortal() {
   const [files, setFiles] = useState<File[]>([]);
   const [supabase] = useState(() => createClient());
   const [isLoading, setIsLoading] = useState(false);
+  const [asStep, setAsStep] = useState<"searching" | "form">("searching");
+  const [symptomQuery, setSymptomQuery] = useState("");
+  const [diagnosis, setDiagnosis] = useState<{ diagnosis: string; solution: string[]; original: { keyword: string; category: string; answer: string } } | null>(null);
 
   const loadHistory = useCallback(async () => {
     if (supabase) {
       try {
         const rows = await fetchRequests(supabase);
         setSubmitted(rows);
-      } catch (err) {
-        console.error("Failed to load history from DB", err);
+      } catch (_e) {
+        console.error("Failed to load history from DB", _e);
       }
     } else {
       const raw = window.localStorage.getItem(adminStorageKey);
@@ -106,9 +116,34 @@ export function UserPortal() {
     }
   }, [supabase]);
 
+  const [dbFaqs, setDbFaqs] = useState<{ id: string; keyword: string; category: string; answer: string }[]>([]);
+
+  useEffect(() => {
+    if (supabase) {
+      fetchFaqs(supabase).then(setDbFaqs).catch(console.error);
+    }
+  }, [supabase]);
+
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  useEffect(() => {
+    if (draft.category === "as" && symptomQuery.length > 1) {
+      const match = dbFaqs.find(f => symptomQuery.toLowerCase().includes(f.keyword.toLowerCase()));
+      if (match) {
+        setDiagnosis({
+          diagnosis: match.category === "network" ? "네트워크 장애" : match.category === "device" ? "기기 결함" : "시스템 오류",
+          solution: match.answer.split(", "),
+          original: match
+        });
+      } else {
+        setDiagnosis(null);
+      }
+    } else {
+      setDiagnosis(null);
+    }
+  }, [symptomQuery, draft.category, dbFaqs]);
 
   const loadForResubmit = (item: WorkItem) => {
     const categoryMap: Record<string, Category> = {
@@ -116,6 +151,7 @@ export function UserPortal() {
       "A/S": "as",
       "서블리": "subly",
       "NAS": "nas",
+      "태블릿": "tablet",
       "기타": "other"
     };
 
@@ -144,7 +180,7 @@ export function UserPortal() {
       Case: "case-1",
       Monitor: "mon-1"
     },
-    totalPrice: 0 // Will be kept for type compatibility but calculated dynamically
+    totalPrice: 0
   });
 
   const calculateTotal = useCallback((nextParts: Record<string, string>) => {
@@ -155,7 +191,6 @@ export function UserPortal() {
   }, []);
 
   const totalPrice = useMemo(() => calculateTotal(config.parts), [config.parts, calculateTotal]);
-
   const updateConfig = (category: string, partId: string) => {
     setConfig({ ...config, parts: { ...config.parts, [category]: partId } });
   };
@@ -245,8 +280,11 @@ export function UserPortal() {
     }
 
     await loadHistory();
-    setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "" });
+    setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
     setFiles([]);
+    setAsStep("searching");
+    setSymptomQuery("");
+    setDiagnosis(null);
     setIsLoading(false);
   };
 
@@ -305,22 +343,80 @@ export function UserPortal() {
             </div>
 
             <div className="mt-5 grid gap-3">
-              <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-                <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder="예: 3층 빔프로젝터 화면이 깜박여요" />
-                <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
-                  <option value="" disabled>선택해주세요</option>
-                  <option>손샘학원(본사)</option>
-                  <option>손샘(수원)</option>
-                  <option>손샘(대치)</option>
-                  <option>손샘(범어)</option>
-                </select>
-              </div>
-              <input
-                value={draft.detail}
-                onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
-                className="field"
-                placeholder={draft.category === "equipment" ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)" : "상세 내용을 한 줄로 적어주세요"}
-              />
+              {draft.category === "as" && asStep === "searching" ? (
+                <div className="mt-2 space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      value={symptomQuery} 
+                      onChange={(e) => setSymptomQuery(e.target.value)}
+                      className="field pl-10" 
+                      placeholder="증상을 입력하세요 (예: 모니터가 안 나와요, 인터넷 끊김)" 
+                    />
+                  </div>
+                  
+                  {diagnosis ? (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-5 shadow-sm animate-in fade-in slide-in-from-top-2">
+                      <div className="flex items-center gap-2 text-blue-800 font-bold mb-3">
+                        <Bot className="h-5 w-5" />
+                        <span>AI 자가 진단 결과: {diagnosis.diagnosis}</span>
+                      </div>
+                      <ul className="space-y-2">
+                        {diagnosis.solution.map((step: string, i: number) => (
+                          <li key={i} className="flex gap-2 text-sm text-slate-600">
+                            <span className="font-bold text-blue-500">{i + 1}.</span>
+                            {step}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-5 flex gap-2">
+                        <button 
+                          onClick={() => {
+                            setAsStep("form");
+                            setDraft({ ...draft, title: symptomQuery, detail: "자가 진단 시도했으나 해결되지 않음" });
+                          }}
+                          className="rounded-lg bg-white border border-slate-200 px-4 py-2 text-xs font-bold hover:bg-slate-50 transition-colors"
+                        >
+                          해결되지 않았습니다 (A/S 접수)
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSymptomQuery("");
+                            setDiagnosis(null);
+                          }}
+                          className="rounded-lg bg-blue-600 text-white px-4 py-2 text-xs font-bold hover:bg-blue-700 transition-colors"
+                        >
+                          해결되었습니다
+                        </button>
+                      </div>
+                    </div>
+                  ) : symptomQuery.length > 1 ? (
+                    <div className="rounded-lg bg-slate-50 p-4 text-center text-sm text-slate-500">
+                      매칭되는 자가 해결 가이드가 없습니다. <br/>
+                      <button onClick={() => setAsStep("form")} className="mt-2 font-bold text-blue-600 underline">상세 내용을 적어서 접수하기</button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                    <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder="요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" />
+                    <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
+                      <option value="" disabled>선택해주세요</option>
+                      <option>손샘학원(본사)</option>
+                      <option>손샘(수원)</option>
+                      <option>손샘(대치)</option>
+                      <option>손샘(범어)</option>
+                    </select>
+                  </div>
+                  <input
+                    value={draft.detail}
+                    onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
+                    className="field"
+                    placeholder={draft.category === "equipment" ? "추가 요청 사항 (예: 설치 장소, 선호 브랜드 등)" : "상세 내용을 적어주세요"}
+                  />
+                </>
+              )}
 
               {draft.category === "equipment" && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
@@ -433,7 +529,7 @@ export function UserPortal() {
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
-                onClick={() => setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "" })}
+                onClick={() => setDraft({ category: "equipment", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" })}
                 className="text-center text-sm font-semibold text-gray-500 hover:text-gray-800"
               >
                 취소하고 새로 작성하기
@@ -473,7 +569,7 @@ export function UserPortal() {
                       <CheckCircle2 className={`mt-0.5 h-4 w-4 ${item.status === "완료" ? "text-green-600" : item.status === "보류" ? "text-rose-600" : "text-blue-600"}`} aria-hidden="true" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">{item.title}</p>
-                        <p className="text-xs text-gray-500">{item.campus} · {item.status}</p>
+                        <p className="text-xs text-gray-500">{item.requester} · {item.status}</p>
                         {item.status === "보류" && (
                           <div className="mt-2">
                             {item.rejectionNote && <p className="mb-2 text-xs font-medium text-rose-700">보류 사유: {item.rejectionNote}</p>}
@@ -505,6 +601,7 @@ function categoryToModule(category: Category) {
   if (category === "as") return "A/S";
   if (category === "subly") return "서블리";
   if (category === "nas") return "NAS";
+  if (category === "tablet") return "태블릿";
   return "기타";
 }
 

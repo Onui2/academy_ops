@@ -5,8 +5,7 @@ import {
   HardDrive,
   Headphones,
   PackageCheck,
-  ShieldCheck,
-  Truck
+  ShieldCheck
 } from "lucide-react";
 import type { EquipmentPart, EquipmentPreset, ModuleSummary, NasMetric, WorkItem } from "@/types/ops";
 

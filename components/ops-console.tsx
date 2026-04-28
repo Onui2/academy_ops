@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   Bot,
-  Calendar,
   Check,
   CheckCircle2,
   ClipboardList,
@@ -14,19 +13,16 @@ import {
   HardDrive,
   Home,
   LogOut,
-  MapPin,
   PackageCheck,
   Printer,
   RefreshCw,
   Search,
   Server,
-  ShieldAlert,
   ShieldCheck,
   Stethoscope,
   Trash2,
   UserCog,
-  X,
-  Zap
+  X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -40,6 +36,7 @@ import {
 } from "@/lib/ops-data";
 import { createClient } from "@/lib/supabase";
 import {
+  createAuditLog,
   createRequest as createDbRequest,
   deleteRequest as deleteDbRequest,
   ensureProfile,
@@ -48,10 +45,10 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
-import type { EquipmentConfig, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { EquipmentConfig, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
-type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "nas" | "audit";
+type MenuKey = "dashboard" | "queue" | "equipment" | "as" | "nas" | "audit" | "subly";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = { module: string; title: string; requester: string; priority: WorkPriority; description: string; amount: string; vendor: string };
 type EquipmentForm = {
@@ -360,9 +357,19 @@ export function OpsConsole() {
     }
   }, [activeMenu, role]);
 
-  const addAudit = (actor: string, event: string) => {
+  const addAudit = (actor: string, event: string, requestId?: string) => {
     const at = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-    setAudit((current) => [{ id: `AUD-${Date.now()}`, at, actor, event }, ...current]);
+    const newLog: AuditEvent = { id: `AUD-${Date.now()}`, at, actor, event };
+    setAudit((current) => [newLog, ...current]);
+    
+    if (supabase && user) {
+      createAuditLog(supabase, {
+        request_id: requestId,
+        actor_id: user.id,
+        actor_label: actor,
+        event: event
+      }).catch(err => console.error("Audit log sync failed", err));
+    }
   };
 
   const addRequest = async (request: Omit<WorkItem, "id">) => {
@@ -1080,11 +1087,6 @@ function EquipmentScreen({
   const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
   const basePrice = isCustomizable ? totalPrice : equipment.unitPrice;
   const total = equipment.count * basePrice;
-
-  const toggleRole = (role: string) => {
-    const exists = equipment.roles.includes(role);
-    setEquipment({ ...equipment, roles: exists ? equipment.roles.filter((item) => item !== role) : [...equipment.roles, role] });
-  };
 
   return (
     <Screen title="장비 구매" desc="컴퓨터 장비는 필요한 성능 사양(CPU/RAM/SSD)을 직접 선택하여 최적화된 견적을 산출할 수 있습니다.">

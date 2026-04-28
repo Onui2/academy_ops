@@ -172,3 +172,35 @@ function parseDueDate(value: string) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   return null;
 }
+
+export async function fetchFaqs(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("as_faqs")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function createAuditLog(supabase: SupabaseClient, log: { request_id?: string; actor_id: string; actor_label: string; event: string; metadata?: Record<string, unknown> }) {
+  const { error } = await supabase
+    .from("audit_logs")
+    .insert([log]);
+  if (error) throw error;
+}
+
+export async function fetchNasPermissions(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("nas_permissions")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function createNasPermissionRequest(supabase: SupabaseClient, request: { user_email: string; resource_name: string; permission_level: string; requested_by: string }) {
+  const { error } = await supabase
+    .from("nas_permissions")
+    .insert([request]);
+  if (error) throw error;
+}
