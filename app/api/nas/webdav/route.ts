@@ -6,7 +6,22 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch (e) {
+    return NextResponse.json(
+      {
+        ok: false,
+        configured: false,
+        message: "유효하지 않은 요청 본문(JSON)입니다.",
+        targets: [],
+        items: []
+      },
+      { status: 400 }
+    );
+  }
+
   const targets = Array.isArray(body.targets) ? body.targets.filter(isTarget) : [];
   return checkTargets(targets);
 }
@@ -17,7 +32,7 @@ async function checkTargets(targets: WebDavTarget[]) {
       {
         ok: false,
         configured: false,
-        message: "NAS WebDAV env not configured",
+        message: "NAS WebDAV 설정이 구성되지 않았습니다.",
         targets: [],
         items: []
       },
@@ -31,7 +46,7 @@ async function checkTargets(targets: WebDavTarget[]) {
   return NextResponse.json({
     ok: okCount > 0,
     configured: true,
-    message: `${okCount}/${results.length} NAS connected`,
+    message: `${okCount}/${results.length} 개의 NAS 연결됨`,
     targets: results,
     items: results.flatMap((target) => target.items.map((item) => ({ ...item, targetId: target.id, targetName: target.name }))).slice(0, 24)
   });
@@ -51,8 +66,43 @@ function isTarget(value: unknown): value is WebDavTarget {
   return Boolean(target.id && target.name && target.url && target.username && target.password);
 }
 
+function isValidExternalUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const hostname = url.hostname.toLowerCase();
+
+    // SSRF 방지: 루프백 및 사설 IP 대역 차단
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("172.") || // 172.16.x.x - 172.31.x.x 대역
+      hostname.endsWith(".local")
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function checkTarget(target: WebDavTarget) {
   const startedAt = Date.now();
+
+  if (!isValidExternalUrl(target.url)) {
+    return {
+      id: target.id,
+      name: target.name,
+      ok: false,
+      status: 403,
+      latencyMs: 0,
+      message: "허용되지 않은 URL 주소입니다. (내부망 접속 차단)",
+      items: []
+    };
+  }
 
   try {
     const response = await fetch(target.url, {
@@ -74,7 +124,7 @@ async function checkTarget(target: WebDavTarget) {
       ok: response.ok || response.status === 207,
       status: response.status,
       latencyMs: Date.now() - startedAt,
-      message: response.ok || response.status === 207 ? "WebDAV connected" : response.statusText,
+      message: response.ok || response.status === 207 ? "연결 성공" : `오류: ${response.statusText}`,
       items: parseDavItems(text).slice(0, 12)
     };
   } catch (error) {
@@ -83,7 +133,7 @@ async function checkTarget(target: WebDavTarget) {
       name: target.name,
       ok: false,
       latencyMs: Date.now() - startedAt,
-      message: error instanceof Error ? error.message : "WebDAV connection failed",
+      message: error instanceof Error ? error.message : "연결 실패",
       items: []
     };
   }
@@ -110,7 +160,7 @@ function getTargets(): WebDavTarget[] {
   return [
     {
       id: "default",
-      name: process.env.NAS_WEBDAV_NAME ?? "NAS",
+      name: process.env.NAS_WEBDAV_NAME ?? "기본 NAS",
       url,
       username,
       password
@@ -119,14 +169,14 @@ function getTargets(): WebDavTarget[] {
 }
 
 function parseDavItems(xml: string) {
-  const responses = xml.match(/<[^:>]*:?response[\s\S]*?<\/[^:>]*:?response>/g) ?? [];
+  const responses = xml.match(/<[^:>]*:?response[\s\S]*?<\/[^:>]*:?response>/gi) ?? [];
 
   return responses.map((entry) => {
     const href = pick(entry, "href");
     const displayName = pick(entry, "displayname") || decodeURIComponent(href.split("/").filter(Boolean).at(-1) ?? "/");
     const size = pick(entry, "getcontentlength");
     const modified = pick(entry, "getlastmodified");
-    const isDirectory = /<[^:>]*:?collection\s*\/?>/.test(entry);
+    const isDirectory = /<[^:>]*:?collection\s*\/?>/i.test(entry);
 
     return {
       name: displayName || "/",

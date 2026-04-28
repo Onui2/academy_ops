@@ -4,8 +4,9 @@ import {
   Activity,
   AlertTriangle,
   Bot,
-  CalendarDays,
+  Calendar,
   Check,
+  CheckCircle2,
   ClipboardList,
   FilePlus2,
   Filter,
@@ -13,16 +14,19 @@ import {
   HardDrive,
   Home,
   LogOut,
+  MapPin,
   PackageCheck,
   Printer,
   RefreshCw,
   Search,
   Server,
+  ShieldAlert,
   ShieldCheck,
   Stethoscope,
   Trash2,
   UserCog,
-  X
+  X,
+  Zap
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -231,6 +235,15 @@ export function OpsConsole() {
     },
     totalPrice: 0
   });
+  const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: "success" | "error" | "info" }>>([]);
+
+  const addToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
+    const id = Date.now().toString();
+    setToasts((current) => [...current, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((current) => current.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
 
   const calculateTotal = useCallback((nextParts: Record<string, string>) => {
     return Object.values(nextParts).reduce((sum, partId) => {
@@ -239,13 +252,10 @@ export function OpsConsole() {
     }, 0);
   }, []);
 
-  useEffect(() => {
-    setConfig((prev) => ({ ...prev, totalPrice: calculateTotal(prev.parts) }));
-  }, [calculateTotal]);
+  const totalPrice = useMemo(() => calculateTotal(config.parts), [config.parts, calculateTotal]);
 
   const updateConfig = (category: string, partId: string) => {
-    const nextParts = { ...config.parts, [category]: partId };
-    setConfig({ parts: nextParts, totalPrice: calculateTotal(nextParts) });
+    setConfig({ ...config, parts: { ...config.parts, [category]: partId } });
   };
 
   useEffect(() => {
@@ -368,8 +378,10 @@ export function OpsConsole() {
       setSelectedId(id);
       setActiveMenu("queue");
       addAudit("Router AI", `${id} ${request.module} 요청 접수`);
+      addToast(`${id} 요청이 성공적으로 접수되었습니다.`, "success");
     } catch (error) {
       setSyncState(error instanceof Error ? error.message : "요청 생성 실패");
+      addToast("요청 생성 중 오류가 발생했습니다.", "error");
     }
   };
 
@@ -399,6 +411,7 @@ export function OpsConsole() {
         },
         `${item.id} 학원 관리자 승인`
       );
+      addToast(`${item.id} 학원 관리자 승인이 완료되었습니다.`, "success");
       return;
     }
 
@@ -414,12 +427,17 @@ export function OpsConsole() {
         },
         `${item.id} 최고 관리자 승인`
       );
+      addToast(`${item.id} 최종 승인이 완료되어 담당자에게 전달되었습니다.`, "success");
       return;
     }
 
     updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
+    addToast(`${item.id} 승인 처리되었습니다.`, "success");
   };
-  const reject = (item: WorkItem) => updateItem(item.id, { status: "보류", audit: item.rejectionNote || "반려 또는 보완 요청", rejectionNote: item.rejectionNote || "보완 필요" }, `${item.id} 보류 처리`);
+  const reject = (item: WorkItem) => {
+    updateItem(item.id, { status: "보류", audit: item.rejectionNote || "반려 또는 보완 요청", rejectionNote: item.rejectionNote || "보완 필요" }, `${item.id} 보류 처리`);
+    addToast(`${item.id} 요청이 보류 처리되었습니다.`, "info");
+  };
   const remove = (id: string) => {
     setItems((current) => current.filter((item) => item.id !== id));
     setSelectedId(items.find((item) => item.id !== id)?.id ?? "");
@@ -427,8 +445,10 @@ export function OpsConsole() {
     if (supabase) {
       deleteDbRequest(supabase, id).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "삭제 실패");
+        addToast("데이터 삭제에 실패했습니다.", "error");
       });
     }
+    addToast("요청이 삭제되었습니다.", "info");
   };
 
   const createManualRequest = () => {
@@ -453,7 +473,7 @@ export function OpsConsole() {
 
   const createEquipment = () => {
     const isCustom = equipment.item === "노트북" || equipment.item === "데스크톱";
-    const basePrice = isCustom ? config.totalPrice : equipment.unitPrice;
+    const basePrice = isCustom ? totalPrice : equipment.unitPrice;
     const total = equipment.count * basePrice;
     const needsAccountingConfirm = total > 500000;
 
@@ -469,8 +489,8 @@ export function OpsConsole() {
 
     addRequest({
       module: "전산 장비",
-      title: `${equipment.campus} ${equipment.item} ${equipment.count}대 구매`,
-      requester: equipment.campus,
+      title: `${equipment.academy} ${equipment.item} ${equipment.count}대 구매`,
+      requester: equipment.academy,
       owner: "경영지원",
       status: needsAccountingConfirm ? "승인 대기" : "검토",
       priority: needsAccountingConfirm ? "높음" : "보통",
@@ -710,7 +730,7 @@ export function OpsConsole() {
             <>
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
-              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} /> : null}
+              {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} config={config} setConfig={setConfig} updateConfig={updateConfig} totalPrice={totalPrice} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
                 <NasScreen 
@@ -738,6 +758,22 @@ export function OpsConsole() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`animate-in slide-in-from-right-5 fade-in duration-300 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur-md ${
+              toast.type === "success" ? "border-emerald-200 bg-emerald-50/90 text-emerald-800" : 
+              toast.type === "error" ? "border-rose-200 bg-rose-50/90 text-rose-800" : 
+              "border-blue-200 bg-blue-50/90 text-blue-800"
+            }`}
+          >
+            {toast.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : toast.type === "error" ? <AlertTriangle className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+            <span className="text-sm font-bold">{toast.message}</span>
+          </div>
+        ))}
       </div>
     </main>
   );
@@ -793,24 +829,72 @@ function Screen({ title, desc, children }: { title: string; desc: string; childr
 function Dashboard(props: { pendingCount: number; approvalCount: number; riskCount: number; auditCount: number; setActiveMenu: (menu: MenuKey) => void }) {
   return (
     <Screen title="대시보드" desc="오늘 처리할 운영 업무를 요약합니다.">
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="진행 업무" value={props.pendingCount.toString()} icon={ClipboardList} />
         <Metric label="승인 대기" value={props.approvalCount.toString()} icon={ShieldCheck} />
         <Metric label="위험 신호" value={props.riskCount.toString()} icon={AlertTriangle} />
         <Metric label="감사 로그" value={props.auditCount.toString()} icon={Activity} />
       </section>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
+        <div className="surface-strong rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="mb-6 flex items-center justify-between">
+            <h3 className="text-lg font-bold">주간 운영 요청 추이</h3>
+            <span className="text-xs font-semibold text-slate-500">최근 7일</span>
+          </div>
+          <div className="flex h-48 items-end gap-2 px-2">
+            {[45, 62, 58, 85, 72, 90, 65].map((height, i) => (
+              <div key={i} className="group relative flex flex-1 flex-col items-center gap-2">
+                <div 
+                  className="w-full rounded-t-lg bg-blue-100 transition-all duration-500 hover:bg-blue-600" 
+                  style={{ height: `${height}%` }}
+                >
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded bg-slate-800 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {height}건
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-slate-400">{["월", "화", "수", "목", "금", "토", "일"][i]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="surface-strong rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="mb-6 flex items-center justify-between">
+            <h3 className="text-lg font-bold">모듈별 요청 분포</h3>
+            <div className="flex gap-2">
+              <div className="flex items-center gap-1"><div className="h-2 w-2 rounded-full bg-blue-500"></div><span className="text-[10px] text-slate-500">전산</span></div>
+              <div className="flex items-center gap-1"><div className="h-2 w-2 rounded-full bg-emerald-500"></div><span className="text-[10px] text-slate-500">NAS</span></div>
+              <div className="flex items-center gap-1"><div className="h-2 w-2 rounded-full bg-amber-500"></div><span className="text-[10px] text-slate-500">A/S</span></div>
+            </div>
+          </div>
+          <div className="relative flex items-center justify-center py-4">
+            <svg viewBox="0 0 100 100" className="h-40 w-40 -rotate-90">
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#f1f5f9" strokeWidth="12" />
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#3b82f6" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 * 0.4} className="transition-all duration-1000" />
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 * 0.7} className="transition-all duration-1000" />
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#f59e0b" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 * 0.9} className="transition-all duration-1000" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-black text-slate-800">{props.pendingCount + props.approvalCount}</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Total Tasks</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {modules.map((module) => {
           const Icon = module.icon;
           return (
-            <article key={module.name} className="surface-strong rounded-lg p-5">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
+            <article key={module.name} className="surface-strong rounded-lg p-5 shadow-sm border border-slate-100 transition-all hover:shadow-md">
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-100">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </div>
               <h3 className="mt-4 text-sm font-bold">{module.name}</h3>
-              <p className="mt-1 min-h-10 text-sm text-muted-foreground">{module.description}</p>
-              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50">
-                열기
+              <p className="mt-1 min-h-10 text-sm text-muted-foreground leading-relaxed">{module.description}</p>
+              <button onClick={() => props.setActiveMenu(module.name.includes("장비") ? "equipment" : module.name.includes("A/S") ? "as" : module.name.includes("서블리") ? "subly" : "nas")} className="focus-ring mt-4 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors">
+                모듈 열기
               </button>
             </article>
           );
@@ -941,23 +1025,34 @@ function QueueTable(props: {
             <tr><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
           </thead>
           <tbody>
-            {props.items.map((item) => (
-              <tr key={item.id} className="border-t border-border hover:bg-blue-50/40">
-                <td className="px-4 py-3">
-                  <button onClick={() => props.openDetail(item.id)} className="text-left font-semibold hover:text-blue-700">{item.title}</button>
-                  <div className="mt-1 text-xs text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
-                </td>
-                <td className="px-4 py-3"><StatusPill status={item.status} /></td>
-                <td className="px-4 py-3">{item.owner}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
-                    <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
-                    <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {props.items.length === 0 ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} className="border-t border-border">
+                  <td className="px-4 py-3"><div className="h-4 w-48 animate-pulse rounded bg-slate-100" /><div className="mt-2 h-3 w-32 animate-pulse rounded bg-slate-50" /></td>
+                  <td className="px-4 py-3"><div className="h-6 w-16 animate-pulse rounded-full bg-slate-100" /></td>
+                  <td className="px-4 py-3"><div className="h-4 w-20 animate-pulse rounded bg-slate-100" /></td>
+                  <td className="px-4 py-3"><div className="h-8 w-24 animate-pulse rounded-lg bg-slate-100" /></td>
+                </tr>
+              ))
+            ) : (
+              props.items.map((item) => (
+                <tr key={item.id} className="border-t border-border hover:bg-blue-50/40 transition-colors">
+                  <td className="px-4 py-3">
+                    <button onClick={() => props.openDetail(item.id)} className="text-left font-bold hover:text-blue-700 transition-colors">{item.title}</button>
+                    <div className="mt-1 text-xs font-medium text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
+                  </td>
+                  <td className="px-4 py-3"><StatusPill status={item.status} /></td>
+                  <td className="px-4 py-3 font-medium text-slate-600">{item.owner}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
+                      <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
+                      <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -971,7 +1066,8 @@ function EquipmentScreen({
   createEquipment,
   config,
   setConfig,
-  updateConfig
+  updateConfig,
+  totalPrice
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
@@ -979,9 +1075,10 @@ function EquipmentScreen({
   config: EquipmentConfig;
   setConfig: (config: EquipmentConfig) => void;
   updateConfig: (category: string, partId: string) => void;
+  totalPrice: number;
 }) {
   const isCustomizable = equipment.item === "노트북" || equipment.item === "데스크톱";
-  const basePrice = isCustomizable ? config.totalPrice : equipment.unitPrice;
+  const basePrice = isCustomizable ? totalPrice : equipment.unitPrice;
   const total = equipment.count * basePrice;
 
   const toggleRole = (role: string) => {
@@ -1132,9 +1229,9 @@ function EquipmentScreen({
               AI 사양 추천
             </h4>
             <div className="mt-4 rounded-xl bg-blue-50 p-4 text-xs text-blue-900">
-              {config.totalPrice > 1000000 ? (
+              {totalPrice > 1500000 ? (
                 <p>현재 구성은 <strong>[고성능]</strong> 등급입니다. 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
-              ) : config.totalPrice > 600000 ? (
+              ) : totalPrice > 750000 ? (
                 <p>현재 구성은 <strong>[표준]</strong> 등급입니다. 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
               ) : (
                 <p>현재 구성은 <strong>[기본]</strong> 등급입니다. 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
@@ -1686,3 +1783,4 @@ function AiHarness() {
     </section>
   );
 }
+

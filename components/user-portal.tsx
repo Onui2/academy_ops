@@ -122,7 +122,7 @@ export function UserPortal() {
     setDraft({
       category: categoryMap[item.module] ?? "other",
       title: item.title,
-      campus: item.requester,
+      academy: item.requester,
       detail: item.description ?? "",
       urgency: item.priority === "긴급" ? "긴급" : item.priority === "높음" ? "빠름" : "보통",
       urgentReason: item.urgentReason ?? "",
@@ -144,7 +144,7 @@ export function UserPortal() {
       Case: "case-1",
       Monitor: "mon-1"
     },
-    totalPrice: 0
+    totalPrice: 0 // Will be kept for type compatibility but calculated dynamically
   });
 
   const calculateTotal = useCallback((nextParts: Record<string, string>) => {
@@ -154,13 +154,10 @@ export function UserPortal() {
     }, 0);
   }, []);
 
-  useEffect(() => {
-    setConfig((prev) => ({ ...prev, totalPrice: calculateTotal(prev.parts) }));
-  }, [calculateTotal]);
+  const totalPrice = useMemo(() => calculateTotal(config.parts), [config.parts, calculateTotal]);
 
   const updateConfig = (category: string, partId: string) => {
-    const nextParts = { ...config.parts, [category]: partId };
-    setConfig({ parts: nextParts, totalPrice: calculateTotal(nextParts) });
+    setConfig({ ...config, parts: { ...config.parts, [category]: partId } });
   };
 
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
@@ -188,9 +185,11 @@ export function UserPortal() {
           const part = equipmentParts.find((p) => p.id === id);
           return `${cat}: ${part?.name ?? "미선택"} (${part?.price.toLocaleString()}원)`;
         }),
-        `대당 가격 합계: ${config.totalPrice.toLocaleString()}원`
+        `대당 가격 합계: ${totalPrice.toLocaleString()}원`
       ]
       : [];
+
+    const user = supabase ? (await supabase.auth.getUser()).data.user : null;
 
     const description = [
       ...configLines,
@@ -212,7 +211,7 @@ export function UserPortal() {
           audit: `${existing.id} 보류 후 재접수됨`
         };
 
-        if (supabase) {
+        if (supabase && user) {
           await updateRequestStatus(supabase, updated);
         } else {
           updateInAdminQueue(updated);
@@ -237,10 +236,12 @@ export function UserPortal() {
         evidenceFiles: files.map((file) => file.name)
       };
 
-      if (!supabase) {
+      if (supabase && user) {
+        const { createRequest } = await import("@/lib/ops-repository");
+        await createRequest(supabase, user, item);
+      } else {
         pushToAdminQueue(item);
       }
-      // TODO: Handle Supabase create for UserPortal if needed
     }
 
     await loadHistory();
@@ -372,12 +373,12 @@ export function UserPortal() {
                     <div className="mt-2 border-t border-blue-200 pt-4">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-bold text-blue-900">구성 합계 (VAT 별도)</span>
-                        <span className="text-lg font-black text-blue-600">{config.totalPrice.toLocaleString()}원</span>
+                        <span className="text-lg font-black text-blue-600">{totalPrice.toLocaleString()}원</span>
                       </div>
                       <div className="mt-3 rounded-lg bg-white p-3 text-xs text-blue-800">
-                        {config.totalPrice > 1000000 ? (
+                        {totalPrice > 1000000 ? (
                           <p><strong>🚀 고성능:</strong> 전문 영상 편집, 대용량 엑셀 작업 등 고성능이 필요한 직무에 권장합니다.</p>
-                        ) : config.totalPrice > 600000 ? (
+                        ) : totalPrice > 600000 ? (
                           <p><strong>💼 표준:</strong> 학원 데스크 및 관리자분들이 사용하시기에 가장 적합한 사양입니다.</p>
                         ) : (
                           <p><strong>📝 기본:</strong> 강사 선생님들의 강의 진행 및 수업용 PC로 최적화된 구성입니다.</p>
@@ -437,7 +438,6 @@ export function UserPortal() {
               >
                 취소하고 새로 작성하기
               </button>
-              )}
             </div>
           </section>
         </section>
