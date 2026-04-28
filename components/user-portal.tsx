@@ -8,6 +8,13 @@ import {
   HelpCircle,
   Laptop,
   Megaphone,
+  MemoryStick,
+  Cpu,
+  Database,
+  Monitor as MonitorIcon,
+  MousePointer2,
+  Keyboard as KeyboardIcon,
+  Usb,
   PackageCheck,
   Paperclip,
   Search,
@@ -613,29 +620,53 @@ export function UserPortal() {
                             <><PackageCheck className="h-4 w-4 text-blue-600" /> 소모품 및 주변기기 선택</>
                           )}
                         </h4>
-                        <div className="flex flex-wrap gap-1">
-                          {draft.requestItem === "데스크톱" ? (
-                            partsCategories.find(c => c.id === "PC")?.items.map((sub) => (
+                      </div>
+
+                      {/* Large Card-style Category Selection */}
+                      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
+                        {draft.requestItem === "데스크톱" ? (
+                          partsCategories.find(c => c.id === "PC")?.items.map((sub) => {
+                            const active = selectedSubCategory === sub;
+                            let Icon = Cpu;
+                            if (sub === "RAM") Icon = MemoryStick;
+                            if (sub === "SSD") Icon = Database;
+                            if (sub === "Monitor") Icon = MonitorIcon;
+                            if (sub === "Keyboard") Icon = KeyboardIcon;
+                            if (sub === "Mouse") Icon = MousePointer2;
+                            if (sub === "Cables") Icon = Usb;
+                            if (sub === "Power" || sub === "Mainboard" || sub === "Case" || sub === "Graphic Card") Icon = HardDrive;
+
+                            return (
                               <button
                                 key={sub}
-                                onClick={() => setSelectedSubCategory(selectedSubCategory === sub ? null : sub)}
-                                className={`rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all ${selectedSubCategory === sub ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+                                onClick={() => setSelectedSubCategory(active ? null : sub)}
+                                className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"}`}
                               >
-                                {sub}
+                                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                  <Icon className="h-4 w-4" />
+                                </div>
+                                <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{sub}</span>
                               </button>
-                            ))
-                          ) : draft.requestItem === "소모품/주변기기" ? (
-                            partsCategories.map((cat) => (
+                            );
+                          })
+                        ) : draft.requestItem === "소모품/주변기기" ? (
+                          partsCategories.map((cat) => {
+                            const active = selectedPartCategory === cat.id;
+                            const Icon = cat.icon;
+                            return (
                               <button
                                 key={cat.id}
-                                onClick={() => setSelectedPartCategory(selectedPartCategory === cat.id ? null : cat.id)}
-                                className={`rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all ${selectedPartCategory === cat.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+                                onClick={() => setSelectedPartCategory(active ? null : cat.id)}
+                                className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"}`}
                               >
-                                {cat.name}
+                                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                  <Icon className="h-4 w-4" />
+                                </div>
+                                <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{cat.name}</span>
                               </button>
-                            ))
-                          ) : null}
-                        </div>
+                            );
+                          })
+                        ) : null}
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
