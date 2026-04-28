@@ -471,7 +471,18 @@ export function UserPortal() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setDraft({ ...draft, category: item.id })}
+                    onClick={() => {
+                      const newDraft = { ...draft, category: item.id };
+                      if (item.id === "equipment") {
+                        newDraft.requestItem = "데스크톱";
+                        setSelectedPartCategory("PC");
+                        setSelectedSubCategory("CPU");
+                      } else {
+                        setSelectedPartCategory(null);
+                        setSelectedSubCategory(null);
+                      }
+                      setDraft(newDraft);
+                    }}
                     className={`rounded-lg border px-4 py-3 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
                   >
                     <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.tone}`}>
