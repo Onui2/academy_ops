@@ -67,13 +67,6 @@ const categories = [
     tone: "bg-purple-50 text-purple-700"
   },
   {
-    id: "parts" as const,
-    title: "소모품 구매",
-    desc: "마우스, 키보드, 각종 소모품 견적 및 요청",
-    icon: Search,
-    tone: "bg-orange-50 text-orange-700"
-  },
-  {
     id: "other" as const,
     title: "잘 모르겠어요",
     desc: "운영팀이 분류해서 처리",
@@ -282,9 +275,12 @@ export function UserPortal() {
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
-    if (draft.category === "equipment") return "장비 종류를 선택해서 운영팀 요청 큐로 바로 접수할 수 있어요.";
+    if (draft.category === "equipment") {
+      if (draft.requestItem === "데스크톱") return "PC 구성을 위한 부품을 선택하거나 기본 견적을 요청할 수 있습니다.";
+      if (draft.requestItem === "소모품/주변기기") return "필요한 소모품이나 주변기기를 담아 요청하세요.";
+      return "장비 종류를 선택해서 운영팀 요청 큐로 바로 접수할 수 있어요.";
+    }
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
-    if (draft.category === "parts") return "필요한 부품을 장바구니에 담아 한 번에 요청할 수 있습니다.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
@@ -308,11 +304,11 @@ export function UserPortal() {
       draft.category === "equipment" && draft.requestItem ? `요청 장비: ${draft.requestItem}` : "",
       draft.category === "tablet" ? `처리 유형: ${draft.title.includes("연장") ? "연장" : draft.title.includes("반납") ? "반납" : "신규"}\n${draft.detail}` : draft.detail,
       draft.category === "nas" ? "안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다." : "",
-      draft.category === "parts" ? `요청 부품 목록:\n${basketDesc}\n\n합계: ${basketTotal.toLocaleString()}원` : "",
+      (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") ? `요청 부품 목록:\n${basketDesc}\n\n합계: ${basketTotal.toLocaleString()}원` : "",
       files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
     ].filter(Boolean).join("\n");
 
-    const amount = draft.category === "parts" ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
+    const amount = (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
 
     let resultItem: WorkItem | null = null;
 
@@ -341,7 +337,7 @@ export function UserPortal() {
     } else {
       const item: WorkItem = {
         id: makeRequestId(),
-        module: categoryToModule(draft.category),
+        module: categoryToModule(draft.category, draft.requestItem),
         title: finalTitle,
         requester: draft.academy,
         owner: "학원 관리자",
@@ -570,79 +566,23 @@ export function UserPortal() {
                     ) : null}
                   </div>
                 </div>
-              ) : draft.category === "parts" ? (
-                <div className="mt-4 space-y-6">
-                  {/* Category Grid */}
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {partsCategories.map((cat) => {
-                      const Icon = cat.icon;
-                      const active = selectedPartCategory === cat.id;
-                      return (
-                        <button
-                          key={cat.id}
-                          onClick={() => setSelectedPartCategory(active ? null : cat.id)}
-                          className={`flex flex-col items-start rounded-xl border p-4 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200"}`}
-                        >
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
-                            <Icon className="h-4 w-4" />
-                          </div>
-                          <h4 className={`mt-3 text-sm font-bold ${active ? "text-blue-900" : "text-slate-800"}`}>{cat.name}</h4>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Search and Parts Grid */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                    <div className="relative mb-4">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        value={partQuery}
-                        onChange={(e) => setPartQuery(e.target.value)}
-                        className="field pl-10"
-                        placeholder="부품명 또는 모델 검색"
-                      />
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {filteredParts.map((part) => (
-                        <article key={part.id} className="flex flex-col rounded-xl border border-slate-100 bg-white p-4 transition-all hover:border-blue-200 hover:shadow-sm">
-                          <div className="flex items-start justify-between">
-                            <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 uppercase">{part.category}</span>
-                            <span className="text-sm font-bold text-slate-900">{part.price.toLocaleString()}원</span>
-                          </div>
-                          <h4 className="mt-2 text-sm font-bold text-slate-800 grow">{part.name}</h4>
-                          <p className="mt-1 text-[11px] text-slate-500">{part.description}</p>
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              onClick={() => window.open(`https://search.danawa.com/dsearch.php?query=${encodeURIComponent(part.name)}`, "_blank")}
-                              className="flex h-8 flex-1 items-center justify-center rounded-lg border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50"
-                            >
-                              다나와
-                            </button>
-                            <button
-                              onClick={() => addToBasket(part)}
-                              className="flex h-8 flex-1 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white hover:bg-blue-700"
-                            >
-                              담기
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                </div>
               ) : (
                 <>
                   <div className={`grid gap-3 ${draft.category === "equipment" ? "sm:grid-cols-[1fr_180px_160px]" : "sm:grid-cols-[1fr_160px]"}`}>
                     <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder={draft.category === "tablet" ? "요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" : "요청 제목을 적어주세요"} />
                     {draft.category === "equipment" ? (
-                      <select value={draft.requestItem ?? "데스크톱"} onChange={(event) => setDraft({ ...draft, requestItem: event.target.value })} className="field" aria-label="장비 종류">
+                      <select value={draft.requestItem ?? "데스크톱"} onChange={(event) => {
+                        const val = event.target.value;
+                        setDraft({ ...draft, requestItem: val });
+                        if (val === "데스크톱") setSelectedPartCategory("PC");
+                        else setSelectedPartCategory(null);
+                      }} className="field" aria-label="장비 종류">
                         <option>노트북</option>
                         <option>데스크톱</option>
                         <option>모니터</option>
                         <option>태블릿</option>
                         <option>네트워크/NAS</option>
+                        <option>소모품/주변기기</option>
                         <option>기타 장비</option>
                       </select>
                     ) : null}
@@ -654,23 +594,69 @@ export function UserPortal() {
                       <option>손샘(범어)</option>
                     </select>
                   </div>
-                  {draft.category === "equipment" && draft.requestItem === "데스크톱" && (
-                    <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm">
-                          <HardDrive className="h-5 w-5" />
+
+                  {(draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") && (
+                    <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                          {draft.requestItem === "데스크톱" ? (
+                            <><HardDrive className="h-4 w-4 text-blue-600" /> PC 부품 사양 구성</>
+                          ) : (
+                            <><PackageCheck className="h-4 w-4 text-blue-600" /> 소모품 및 주변기기 선택</>
+                          )}
+                        </h4>
+                        {draft.requestItem === "소모품/주변기기" && (
+                          <div className="flex gap-1">
+                            {partsCategories.map((cat) => (
+                              <button
+                                key={cat.id}
+                                onClick={() => setSelectedPartCategory(selectedPartCategory === cat.id ? null : cat.id)}
+                                className={`rounded-lg px-3 py-1 text-[10px] font-bold transition-all ${selectedPartCategory === cat.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+                              >
+                                {cat.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                        <div className="relative mb-4">
+                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            value={partQuery}
+                            onChange={(e) => setPartQuery(e.target.value)}
+                            className="field pl-10 h-10 text-xs"
+                            placeholder="부품명 또는 모델 검색"
+                          />
                         </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-blue-900">조립 PC 사양 구성이 필요하신가요?</h4>
-                          <p className="text-xs text-blue-700">부품별로 직접 담아 견적을 요청하려면 '소모품 구매' 메뉴를 이용해 주세요.</p>
+
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {filteredParts.map((part) => (
+                            <article key={part.id} className="flex flex-col rounded-xl border border-slate-100 bg-white p-3 transition-all hover:border-blue-200 hover:shadow-sm">
+                              <div className="flex items-start justify-between">
+                                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-500 uppercase">{part.category}</span>
+                                <span className="text-xs font-bold text-slate-900">{part.price.toLocaleString()}원</span>
+                              </div>
+                              <h4 className="mt-1.5 text-xs font-bold text-slate-800 grow line-clamp-1">{part.name}</h4>
+                              <div className="mt-2.5 flex gap-1.5">
+                                <button
+                                  onClick={() => window.open(`https://search.danawa.com/dsearch.php?query=${encodeURIComponent(part.name)}`, "_blank")}
+                                  className="flex h-7 flex-1 items-center justify-center rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
+                                >
+                                  다나와
+                                </button>
+                                <button
+                                  onClick={() => addToBasket(part)}
+                                  className="flex h-7 flex-1 items-center justify-center rounded-lg bg-blue-600 text-[10px] font-bold text-white hover:bg-blue-700"
+                                >
+                                  담기
+                                </button>
+                              </div>
+                            </article>
+                          ))}
                         </div>
                       </div>
-                      <button
-                        onClick={() => setDraft({ ...draft, category: "parts", requestItem: undefined })}
-                        className="rounded-lg bg-white border border-blue-200 px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 shadow-sm transition-all"
-                      >
-                        부품 고르러 가기
-                      </button>
                     </div>
                   )}
                   <input
@@ -815,7 +801,7 @@ export function UserPortal() {
                 </div>
               </div>
 
-              {draft.category === "parts" && partsBasket.length > 0 && (
+              {(draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") && partsBasket.length > 0 && (
                 <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
                   <h4 className="flex items-center justify-between text-[11px] font-black text-slate-400 uppercase">
                     장바구니 <span>{partsBasket.length}</span>
@@ -899,12 +885,14 @@ export function UserPortal() {
   );
 }
 
-function categoryToModule(category: Category) {
-  if (category === "equipment") return "전산 장비";
+function categoryToModule(category: Category, requestItem?: string) {
+  if (category === "equipment") {
+    if (requestItem === "데스크톱" || requestItem === "소모품/주변기기") return "부품 구매";
+    return "전산 장비";
+  }
   if (category === "as") return "A/S";
   if (category === "nas") return "NAS";
   if (category === "tablet") return "태블릿";
-  if (category === "parts") return "부품 구매";
   return "기타";
 }
 
