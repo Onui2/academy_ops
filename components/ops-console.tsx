@@ -632,7 +632,14 @@ export function OpsConsole() {
   }, [activeMenu, role]);
 
   const addAudit = (actor: string, event: string, requestId?: string) => {
-    const at = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+    const at = new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).format(new Date());
     const newLog: AuditEvent = { id: `AUD-${Date.now()}`, at, actor, event };
     setAudit((current) => [newLog, ...current]);
     
@@ -686,7 +693,7 @@ export function OpsConsole() {
     const nextItem = items.find((item) => item.id === id);
     const patched = nextItem ? { ...nextItem, ...patch } : null;
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
-    addAudit(roles.find((item) => item.value === role)?.label ?? "사용자", event);
+    addAudit(userDisplayName, event);
     if (supabase && patched) {
       await updateRequestStatus(supabase, patched).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "상태 저장 실패");
@@ -761,7 +768,14 @@ export function OpsConsole() {
         approvalStep: (item.approvalStep ?? 0) + 1,
         approvalNote: item.approvalNote,
         approvedBy: userDisplayName,
-        approvedAt: new Date().toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+        approvedAt: new Intl.DateTimeFormat("ko-KR", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        }).format(new Date())
       },
       `${item.id} 승인 진행`
     );
