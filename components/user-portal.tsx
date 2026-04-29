@@ -144,6 +144,7 @@ const categories = [
 ];
 
 const adminStorageKey = "academy-ops-hub-state-v2";
+const teacherLoginHintStorageKey = "flipedu-teacher-login-hint";
 const teacherSessionPollMs = 15000;
 
 function readAdminQueueFromStorage() {
@@ -976,6 +977,10 @@ export function UserPortal() {
     await fetch("/api/teacher/session", {
       method: "DELETE"
     }).catch(() => undefined);
+
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(teacherLoginHintStorageKey);
+    }
 
     setTeacherSession(null);
     setSupabaseUser(null);

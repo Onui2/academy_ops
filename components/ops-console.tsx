@@ -7,6 +7,7 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   CalendarDays,
   Download,
@@ -138,6 +139,7 @@ function extractCleanName(rawName: string) {
 
 const storageKey = "academy-ops-hub-state-v2";
 const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
+const teacherLoginHintStorageKey = "flipedu-teacher-login-hint";
 const teacherSessionPollMs = 15000;
 
 const roles: { value: UserRole; label: string }[] = [
@@ -421,6 +423,7 @@ export function OpsConsole() {
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
   const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
@@ -1179,10 +1182,12 @@ export function OpsConsole() {
   };
 
   const signOut = async () => {
+    setIsProfileOpen(false);
     if (supabase) {
       await supabase.auth.signOut();
     }
     await fetch("/api/teacher/session", { method: "DELETE" }).catch(() => undefined);
+    window.localStorage.removeItem(teacherLoginHintStorageKey);
     setTeacherSession(null);
     setUser(null);
     setSyncState("로그아웃됨");
@@ -1208,23 +1213,42 @@ export function OpsConsole() {
                 {visibleSyncState}
               </span>
             ) : null}
-            <span className="hidden rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-bold sm:inline-flex md:px-3 md:py-2 md:text-sm">
-              {roles.find((item) => item.value === role)?.label ?? "운영(Ops)"}
-            </span>
-            
-            <div className="hidden items-center gap-3 md:flex">
-              <div className="text-right">
-                <p className="text-sm font-bold text-slate-900">{userDisplayName}</p>
-                <p className="text-xs font-medium text-slate-500">{userDisplayBranch}</p>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-blue-200 bg-blue-100 shadow-sm">
-                <span className="text-sm font-bold text-blue-700">{userDisplayName.charAt(0)}</span>
-              </div>
-            </div>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen((current) => !current)}
+                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:bg-slate-50"
+              >
+                <div className="hidden min-w-0 sm:block">
+                  <p className="truncate text-sm font-black text-slate-900">{userDisplayName}</p>
+                  <p className="truncate text-xs text-slate-500">{userDisplayBranch}</p>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-blue-200 bg-blue-100 shadow-sm">
+                  <span className="text-sm font-bold text-blue-700">{userDisplayName.charAt(0)}</span>
+                </div>
+                <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isProfileOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+              </button>
 
-            <button onClick={signOut} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700 sm:h-10 sm:w-10" aria-label="로그아웃">
-              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
-            </button>
+              {isProfileOpen ? (
+                <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="rounded-xl bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-black text-slate-900">{userDisplayName}</p>
+                    <p className="mt-1 text-xs text-slate-500">{userDisplayBranch}</p>
+                    <div className="mt-3 inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                      {roles.find((item) => item.value === role)?.label ?? "운영(Ops)"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={signOut}
+                    className="mt-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50"
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden="true" />
+                    로그아웃
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>

@@ -559,7 +559,7 @@ export function TeacherAccessGate({
                 </label>
 
                 <label className="grid gap-2">
-                  <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Username</span>
+                  <span className="text-xs font-black tracking-[0.08em] text-slate-400">아이디</span>
                   <div className="relative">
                     <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
