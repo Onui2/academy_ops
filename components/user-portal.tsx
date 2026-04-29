@@ -17,6 +17,7 @@ import {
   Usb,
   PackageCheck,
   Paperclip,
+  RefreshCw,
   Search,
   ShieldCheck,
   Wrench,
@@ -28,6 +29,8 @@ import { createClient } from "@/lib/supabase";
 import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
 import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
 import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-data";
+import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
+import { useLivePartPrices } from "@/lib/use-live-part-prices";
 import type { BasketItem, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
 
 type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "parts" | "other";
@@ -118,10 +121,10 @@ const asFaqCategories = [
   }
 ] as const;
 
-const addToast = (message: string, type: "success" | "error" | "info" = "info") => {
-  // Simple toast implementation using alert for now, or console
-  console.log(`[${type.toUpperCase()}] ${message}`);
-  // In a real app, this would trigger a toast UI component
+type ToastItem = {
+  id: number;
+  message: string;
+  type: "success" | "error" | "info";
 };
 
 export function UserPortal() {
@@ -140,7 +143,7 @@ export function UserPortal() {
   const [files, setFiles] = useState<File[]>([]);
   const [supabase] = useState(() => createClient());
   const [isLoading, setIsLoading] = useState(false);
-  const [recentSubmission, setRecentSubmission] = useState<WorkItem | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
   const [symptomQuery, setSymptomQuery] = useState("");
   const [diagnosis, setDiagnosis] = useState<{
@@ -152,6 +155,28 @@ export function UserPortal() {
   const [partQuery, setPartQuery] = useState("");
   const [selectedPartCategory, setSelectedPartCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+  const shouldLoadPartPrices =
+    draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기");
+  const allPartIds = useMemo(() => equipmentParts.map((part) => part.id), []);
+  const { quotes: livePartQuotes, isLoading: isPartPriceLoading, lastCheckedAt, refresh: refreshPartPrices } = useLivePartPrices(allPartIds, shouldLoadPartPrices);
+  const liveEquipmentParts = useMemo(
+    () =>
+      equipmentParts.map((part) => ({
+        ...part,
+        price: livePartQuotes[part.id]?.price ?? part.price
+      })),
+    [livePartQuotes]
+  );
+  const submittedQueue = useMemo(() => [...submitted].sort((left, right) => right.id.localeCompare(left.id)), [submitted]);
+
+  const pushToast = useCallback((message: string, type: ToastItem["type"] = "info") => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((current) => [...current, { id, message, type }]);
+
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, type === "error" ? 5200 : 3600);
+  }, []);
 
   const loadHistory = useCallback(async () => {
     if (supabase) {
@@ -244,7 +269,7 @@ export function UserPortal() {
   const desktopPartCategories = partsCategories.find((category) => category.id === "PC")?.items ?? [];
 
   const filteredParts = useMemo(() => {
-    let result = equipmentParts;
+    let result = liveEquipmentParts;
     if (selectedPartCategory) {
       const catObj = partsCategories.find((c) => c.id === selectedPartCategory);
       if (catObj) {
@@ -260,10 +285,35 @@ export function UserPortal() {
       );
     }
     return result;
-  }, [selectedPartCategory, selectedSubCategory, partQuery]);
+  }, [liveEquipmentParts, partQuery, selectedPartCategory, selectedSubCategory]);
+
+  useEffect(() => {
+    setPartsBasket((current) =>
+      current.map((item) => {
+        const quote = item.partId ? livePartQuotes[item.partId] : null;
+        if (!quote || item.price === quote.price) return item;
+        return {
+          ...item,
+          price: quote.price,
+          priceSource: quote.source,
+          checkedAt: quote.checkedAt
+        };
+      })
+    );
+  }, [livePartQuotes]);
 
   const addToBasket = (part: Omit<BasketItem, "id">) => {
-    setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
+    const quote = livePartQuotes[part.id as string];
+    setPartsBasket([
+      ...partsBasket,
+      {
+        ...part,
+        id: Date.now() + Math.random(),
+        partId: part.id as string,
+        priceSource: quote?.source,
+        checkedAt: quote?.checkedAt
+      }
+    ]);
   };
 
   const removeFromBasket = (id: BasketItem["id"]) => {
@@ -273,13 +323,32 @@ export function UserPortal() {
   const applyPreset = (preset: EquipmentPreset) => {
     const newBasket: BasketItem[] = [];
     Object.values(preset.parts).forEach((partId) => {
-      const part = equipmentParts.find((p) => p.id === partId);
+      const part = liveEquipmentParts.find((p) => p.id === partId);
       if (part) {
-        newBasket.push({ ...part, id: Date.now() + Math.random() });
+        const quote = livePartQuotes[part.id];
+        newBasket.push({
+          ...part,
+          id: Date.now() + Math.random(),
+          partId: part.id,
+          priceSource: quote?.source,
+          checkedAt: quote?.checkedAt
+        });
       }
     });
     setPartsBasket(newBasket);
-    addToast(`${preset.name} 구성이 적용되었습니다.`, "success");
+    pushToast(`${preset.name} 구성을 불러왔습니다.`, "success");
+  };
+
+  const openDanawa = (partId: string, fallbackName: string) => {
+    const quote = livePartQuotes[partId];
+    const url = quote?.searchUrl ?? buildDanawaSearchUrl(resolveDanawaQuery(partId, fallbackName));
+    window.open(url, "_blank");
+  };
+
+  const openGmarket = (partId: string, fallbackName: string) => {
+    const quote = livePartQuotes[partId];
+    const url = quote?.gmarketUrl ?? buildGmarketSearchUrl(resolveGmarketQuery(partId, fallbackName));
+    window.open(url, "_blank");
   };
 
   const loadForResubmit = (item: WorkItem) => {
@@ -369,10 +438,10 @@ export function UserPortal() {
             updateInAdminQueue(updated);
           }
           resultItem = updated;
-          addToast("재접수가 완료되었습니다.", "success");
+          pushToast("보류 요청을 다시 접수했습니다.", "success");
         }
       } catch (error) {
-        addToast(error instanceof Error ? error.message : "재접수 중 오류가 발생했습니다.", "error");
+        pushToast(error instanceof Error ? error.message : "재접수 중 오류가 발생했습니다.", "error");
         setIsLoading(false);
         return;
       }
@@ -413,16 +482,15 @@ export function UserPortal() {
           pushToAdminQueue(item);
         }
         resultItem = item;
-        addToast("접수가 완료되었습니다.", "success");
+        pushToast(`${item.id} 요청이 접수되었습니다.`, "success");
       } catch (error) {
-        addToast(error instanceof Error ? error.message : "접수 중 오류가 발생했습니다.", "error");
+        pushToast(error instanceof Error ? error.message : "요청 접수 중 오류가 발생했습니다.", "error");
         setIsLoading(false);
         return;
       }
     }
 
     await loadHistory();
-    setRecentSubmission(resultItem);
     setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
     setPartsBasket([]);
     setFiles([]);
@@ -451,42 +519,6 @@ export function UserPortal() {
 
       <div className="mx-auto grid w-full max-w-[1560px] gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_260px]">
         <section className="grid content-start gap-6 self-start">
-          {recentSubmission ? (
-            <section className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-100">
-                    <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-600">Request Accepted</p>
-                    <h2 className="mt-2 text-2xl font-black text-slate-900">{recentSubmission.id}</h2>
-                    <p className="mt-1 text-sm text-slate-600">{recentSubmission.title}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setRecentSubmission(null)}
-                  className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
-                >
-                  닫기
-                </button>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
-                  <p className="text-[11px] font-bold text-slate-400">상태</p>
-                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.status}</p>
-                </div>
-                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
-                  <p className="text-[11px] font-bold text-slate-400">담당</p>
-                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.owner}</p>
-                </div>
-                <div className="rounded-xl border border-white/80 bg-white px-4 py-3">
-                  <p className="text-[11px] font-bold text-slate-400">우선순위</p>
-                  <p className="mt-1 text-sm font-black text-slate-900">{recentSubmission.priority}</p>
-                </div>
-              </div>
-            </section>
-          ) : null}
           <div className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
             <p className="mt-1 text-sm text-gray-500">카테고리를 고르고 요청 내용을 적으면 운영팀으로 전달됩니다.</p>
@@ -521,6 +553,83 @@ export function UserPortal() {
               })}
             </div>
           </div>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Request Queue</p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">내 요청 큐</h2>
+                <p className="mt-1 text-sm text-slate-500">접수한 요청을 여기서 한 번에 보고, 보류된 건은 바로 수정해서 다시 올릴 수 있습니다.</p>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-right">
+                <p className="text-[11px] font-bold text-blue-600">현재 요청</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{submittedQueue.length}</p>
+              </div>
+            </div>
+
+            {submittedQueue.length ? (
+              <div className="mt-4 grid max-h-[360px] gap-3 overflow-y-auto pr-1">
+                {submittedQueue.map((item) => {
+                  const normalizedStatus = normalizeStatus(item.status);
+                  const isRejected = normalizedStatus === "보류";
+                  const isComplete = normalizedStatus === "완료";
+
+                  return (
+                    <div key={item.id} className={`rounded-xl border p-4 ${isRejected ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2
+                              className={`h-4 w-4 ${isComplete ? "text-emerald-600" : isRejected ? "text-rose-600" : "text-blue-600"}`}
+                              aria-hidden="true"
+                            />
+                            <p className="truncate text-sm font-black text-slate-900">{item.title}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {item.id} · {normalizeModule(item.module)} · {normalizedStatus}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                            isComplete
+                              ? "bg-emerald-50 text-emerald-700"
+                              : isRejected
+                                ? "bg-rose-100 text-rose-700"
+                                : "bg-blue-50 text-blue-700"
+                          }`}
+                        >
+                          {normalizedStatus}
+                        </span>
+                      </div>
+
+                      {item.rejectionNote && isRejected ? (
+                        <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs font-medium text-rose-700">보류 사유: {item.rejectionNote}</p>
+                      ) : null}
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span>요청자: {item.requester}</span>
+                        <span>담당: {item.owner}</span>
+                        <span>우선순위: {normalizePriority(item.priority)}</span>
+                      </div>
+
+                      {isRejected ? (
+                        <button
+                          onClick={() => loadForResubmit(item)}
+                          className="mt-3 inline-flex h-8 items-center justify-center rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-700"
+                        >
+                          내용 불러와서 다시 접수
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                아직 접수된 요청이 없습니다. 아래에서 카테고리를 선택해 바로 요청을 등록해보세요.
+              </p>
+            )}
+          </section>
 
           <section className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-3">
@@ -739,30 +848,58 @@ export function UserPortal() {
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                        <div className="relative mb-4">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                          <div className="relative min-w-[220px] flex-1">
                           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                           <input
                             value={partQuery}
-                            onChange={(e) => setPartQuery(e.target.value)}
-                            className="field pl-10 h-10 text-xs"
-                            placeholder="부품명 또는 모델 검색"
+                            onChange={(event) => setPartQuery(event.target.value)}
+                            className="field h-10 pl-10 text-xs"
+                            placeholder="모델명, 제조사, 부품명 검색"
                           />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void refreshPartPrices()}
+                            disabled={isPartPriceLoading}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${isPartPriceLoading ? "animate-spin" : ""}`} />
+                            {isPartPriceLoading ? "媛寃?議고쉶 以?.." : "媛寃?깉濡좊Ц"}
+                          </button>
                         </div>
+                        <p className="mb-4 text-[11px] font-medium text-slate-500">
+                          {lastCheckedAt
+                            ? `?ㅼ떆媛?媛寃?湲곗? ${new Date(lastCheckedAt).toLocaleTimeString("ko-KR", {
+                                hour: "2-digit",
+                                minute: "2-digit"
+                              })} 쨌 ?ㅻ굹? 湲곗??吏留덉폆 ??곗닔留??곌껐 諛붾줈媛湲곕? ?쒓났?⑸땲??`
+                            : "?ㅻ굹? ?ㅼ떆媛?媛寃⑥쓣 遺덈윭?ㅺ퀬 ?덉뒿?덈떎."}
+                        </p>
 
                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                           {filteredParts.map((part) => (
                             <article key={part.id} className="flex flex-col rounded-xl border border-slate-100 bg-white p-3 transition-all hover:border-blue-200 hover:shadow-sm">
                               <div className="flex items-start justify-between">
                                 <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-500 uppercase">{part.category}</span>
-                                <span className="text-xs font-bold text-slate-900">{part.price.toLocaleString()}원</span>
+                                <div className="text-right">
+                                  <span className="block text-xs font-bold text-slate-900">{part.price.toLocaleString()}원</span>
+                                  <span className="block text-[10px] font-bold text-emerald-600">{livePartQuotes[part.id]?.status === "live" ? "실시간가" : "기준가"}</span>
+                                </div>
                               </div>
                               <h4 className="mt-1.5 text-xs font-bold text-slate-800 grow line-clamp-1">{part.name}</h4>
                               <div className="mt-2.5 flex gap-1.5">
                                 <button
-                                  onClick={() => window.open(`https://search.danawa.com/dsearch.php?query=${encodeURIComponent(part.name)}`, "_blank")}
+                                  onClick={() => openDanawa(part.id, part.name)}
                                   className="flex h-7 flex-1 items-center justify-center rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
                                 >
                                   다나와
+                                </button>
+                                <button
+                                  onClick={() => openGmarket(part.id, part.name)}
+                                  className="flex h-7 flex-1 items-center justify-center rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
+                                >
+                                  지마켓
                                 </button>
                                 <button
                                   onClick={() => addToBasket(part)}
@@ -999,8 +1136,70 @@ export function UserPortal() {
           </section>
         </aside>
       </div>
+
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2 px-4 sm:px-0">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-lg backdrop-blur ${
+              toast.type === "success"
+                ? "border-emerald-200 bg-white/95"
+                : toast.type === "error"
+                  ? "border-rose-200 bg-white/95"
+                  : "border-slate-200 bg-white/95"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full ${
+                  toast.type === "success" ? "bg-emerald-50 text-emerald-600" : toast.type === "error" ? "bg-rose-50 text-rose-600" : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900">{toast.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setToasts((current) => current.filter((item) => item.id !== toast.id))}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="토스트 닫기"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </main>
   );
+}
+
+function normalizeStatus(status?: string) {
+  if (!status) return "대기";
+  if (status === "접수" || status === "?묒닔") return "접수";
+  if (status === "진행 중" || status === "吏꾪뻾 以?") return "진행 중";
+  if (status === "완료" || status === "?꾨즺") return "완료";
+  if (status === "보류" || status === "蹂대쪟") return "보류";
+  return status;
+}
+
+function normalizePriority(priority?: string) {
+  if (!priority) return "보통";
+  if (priority === "긴급" || priority === "湲닿툒") return "긴급";
+  if (priority === "높음" || priority === "?믪쓬") return "높음";
+  if (priority === "보통" || priority === "蹂댄넻") return "보통";
+  return priority;
+}
+
+function normalizeModule(module?: string) {
+  if (!module) return "기타";
+  if (module === "전산 장비" || module === "?꾩궛 ?λ퉬") return "전산 장비";
+  if (module === "부품 구매" || module === "遺??援щℓ") return "부품 구매";
+  if (module === "태블릿" || module === "?쒕툝由?") return "태블릿";
+  if (module === "기타" || module === "湲고?") return "기타";
+  return module;
 }
 
 function categoryToModule(category: Category, requestItem?: string) {

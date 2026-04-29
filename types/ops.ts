@@ -79,10 +79,13 @@ export type EquipmentPreset = {
 
 export type BasketItem = {
   id: number | string;
+  partId?: string;
   category: string;
   name: string;
   price: number;
   description: string;
   performanceNote: string;
   tier: string;
+  priceSource?: string;
+  checkedAt?: string;
 };

@@ -36,7 +36,9 @@ import {
   workItems as seedItems 
 } from "@/lib/ops-data";
 import { diagnosisPatterns } from "@/lib/diagnosis-data";
+import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
 import { createClient } from "@/lib/supabase";
+import { useLivePartPrices } from "@/lib/use-live-part-prices";
 import {
   createAuditLog,
   createNasPermissionRequest,
@@ -274,6 +276,16 @@ export function OpsConsole() {
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
   const [partsBasket, setPartsBasket] = useState<BasketItem[]>([]);
+  const allPartIds = useMemo(() => equipmentParts.map((part) => part.id), []);
+  const { quotes: livePartQuotes, isLoading: isPartPriceLoading, lastCheckedAt: partPricesCheckedAt, refresh: refreshPartPrices } = useLivePartPrices(allPartIds, activeMenu === "parts");
+  const liveEquipmentParts = useMemo(
+    () =>
+      equipmentParts.map((part) => ({
+        ...part,
+        price: livePartQuotes[part.id]?.price ?? part.price
+      })),
+    [livePartQuotes]
+  );
   const [symptom, setSymptom] = useState("빔프로젝터 화면이 깜박이고 소리가 끊김");
   const [items, setItems] = useState<WorkItem[]>(seedItems);
   const [audit, setAudit] = useState<AuditEvent[]>(initialAudit);
@@ -366,6 +378,21 @@ export function OpsConsole() {
     window.localStorage.setItem(webdavTargetsKey, JSON.stringify(webdavTargets));
   }, [webdavTargets]);
 
+  useEffect(() => {
+    setPartsBasket((current) =>
+      current.map((item) => {
+        const quote = item.partId ? livePartQuotes[item.partId] : null;
+        if (!quote || item.price === quote.price) return item;
+        return {
+          ...item,
+          price: quote.price,
+          priceSource: quote.source,
+          checkedAt: quote.checkedAt
+        };
+      })
+    );
+  }, [livePartQuotes]);
+
   const loadDbRequests = useCallback(async (nextUser = user) => {
     if (!supabase || !nextUser) return;
     try {
@@ -444,7 +471,9 @@ export function OpsConsole() {
   const pendingCount = items.filter((item) => item.status !== "완료").length;
   const approvalCount = items.filter((item) => item.status === "승인 대기").length;
   const riskCount = items.filter((item) => item.priority === "긴급" || item.status === "보류").length;
-  const visibleMenuItems = menuItems.filter((item) => item.key !== "audit" || isAdminRole(role));
+  const visibleMenuItems = menuItems.filter(
+    (item) => item.key !== "equipment" && item.key !== "parts" && (item.key !== "audit" || isAdminRole(role))
+  );
 
   useEffect(() => {
     if (activeMenu === "audit" && !isAdminRole(role)) {
@@ -909,7 +938,20 @@ export function OpsConsole() {
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
               {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} setActiveMenu={setActiveMenu} /> : null}
-              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} partsBasket={partsBasket} setPartsBasket={setPartsBasket} addToast={addToast} /> : null}
+              {activeMenu === "parts" ? (
+                <PartsScreen
+                  addRequest={addRequest}
+                  setActiveMenu={setActiveMenu}
+                  partsBasket={partsBasket}
+                  setPartsBasket={setPartsBasket}
+                  addToast={addToast}
+                  parts={liveEquipmentParts}
+                  livePartQuotes={livePartQuotes}
+                  isPriceLoading={isPartPriceLoading}
+                  lastCheckedAt={partPricesCheckedAt}
+                  refreshPrices={refreshPartPrices}
+                />
+              ) : null}
               {activeMenu === "tablet" ? <TabletScreen tablet={tablet} setTablet={setTablet} createTabletRequest={createTabletRequest} role={role} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
@@ -1078,11 +1120,11 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
               <p className="mt-1 min-h-10 text-sm text-muted-foreground leading-relaxed">{module.description}</p>
               <button onClick={() => {
                 const name = module.name;
-                if (name.includes("장비")) props.setActiveMenu("equipment");
+                if (name.includes("장비")) window.location.href = "/user";
                 else if (name.includes("A/S")) props.setActiveMenu("as");
                 else if (name.includes("NAS")) props.setActiveMenu("nas");
                 else if (name.includes("태블릿")) props.setActiveMenu("tablet");
-                else if (name.includes("부품")) props.setActiveMenu("parts");
+                else if (name.includes("부품")) window.location.href = "/user";
               }} className="focus-ring mt-4 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors">
                 모듈 열기
               </button>
@@ -1118,9 +1160,6 @@ function QueueScreen(props: {
   approve: (item: WorkItem) => void;
   reject: (item: WorkItem) => void;
   remove: (id: string) => void;
-  form: RequestForm;
-  setForm: (value: RequestForm) => void;
-  createManualRequest: () => Promise<WorkItem | undefined>;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -1135,7 +1174,7 @@ function QueueScreen(props: {
 
   return (
     <Screen title="요청 큐" desc="모든 요청의 진행 상태와 승인 액션을 관리합니다.">
-      <QueueTable {...props} openCreate={() => setCreateOpen(true)} openDetail={openDetail} />
+      <QueueTable {...props} openDetail={openDetail} />
       {createOpen ? (
         <Modal title="요청 접수" onClose={() => setCreateOpen(false)}>
           <RequestComposer
@@ -1201,7 +1240,6 @@ function QueueTable(props: {
   approve: (item: WorkItem) => void;
   reject: (item: WorkItem) => void;
   remove: (id: string) => void;
-  openCreate: () => void;
   openDetail: (id: string) => void;
 }) {
   return (
@@ -1215,9 +1253,9 @@ function QueueTable(props: {
               {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </div>
-          <button onClick={props.openCreate} className="inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">
+          <div className="hidden">
             접수
-          </button>
+          </div>
         </div>
       </div>
       <div className="hidden md:block overflow-x-auto">
@@ -2678,19 +2716,29 @@ function PartsScreen({
   setActiveMenu,
   partsBasket,
   setPartsBasket,
-  addToast
+  addToast,
+  parts,
+  livePartQuotes,
+  isPriceLoading,
+  lastCheckedAt,
+  refreshPrices
 }: {
   addRequest: (r: Omit<WorkItem, "id">) => void;
   setActiveMenu: (m: MenuKey) => void;
   partsBasket: BasketItem[];
   setPartsBasket: (v: BasketItem[]) => void;
   addToast: (message: string, type?: "success" | "error" | "info") => void;
+  parts: typeof equipmentParts;
+  livePartQuotes: Record<string, { status: "live" | "fallback"; source: string; checkedAt: string; searchUrl: string; gmarketUrl: string }>;
+  isPriceLoading: boolean;
+  lastCheckedAt: string | null;
+  refreshPrices: () => Promise<void>;
 }) {
   const [partQuery, setPartQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const filteredItems = useMemo(() => {
-    let result = equipmentParts;
+    let result = parts;
     if (selectedCategory) {
       const catObj = partsCategories.find(c => c.id === selectedCategory);
       if (catObj) {
@@ -2704,10 +2752,20 @@ function PartsScreen({
       );
     }
     return result;
-  }, [selectedCategory, partQuery]);
+  }, [partQuery, parts, selectedCategory]);
 
   const addToBasket = (part: Omit<BasketItem, "id">) => {
-    setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
+    const quote = livePartQuotes[part.id as string];
+    setPartsBasket([
+      ...partsBasket,
+      {
+        ...part,
+        id: Date.now() + Math.random(),
+        partId: part.id as string,
+        priceSource: quote?.source,
+        checkedAt: quote?.checkedAt
+      }
+    ]);
   };
 
   const removeFromBasket = (id: BasketItem["id"]) => {
@@ -2718,8 +2776,16 @@ function PartsScreen({
     setActiveMenu("equipment");
   };
 
-  const openDanawa = (query: string) => {
-    window.open(`https://search.danawa.com/dsearch.php?query=${encodeURIComponent(query)}`, "_blank");
+  const openDanawa = (partId: string, fallbackName: string) => {
+    const quote = livePartQuotes[partId];
+    const url = quote?.searchUrl ?? buildDanawaSearchUrl(resolveDanawaQuery(partId, fallbackName));
+    window.open(url, "_blank");
+  };
+
+  const openGmarket = (partId: string, fallbackName: string) => {
+    const quote = livePartQuotes[partId];
+    const url = quote?.gmarketUrl ?? buildGmarketSearchUrl(resolveGmarketQuery(partId, fallbackName));
+    window.open(url, "_blank");
   };
 
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
@@ -2750,24 +2816,49 @@ function PartsScreen({
           </div>
 
           <section className="surface-strong rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-100">
-            <div className="mb-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-               <Search className="h-5 w-5 text-slate-400" />
-               <input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} className="w-full bg-transparent text-sm font-medium outline-none" placeholder="부품명 또는 모델 검색" />
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-[220px] flex-1 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                <Search className="h-5 w-5 text-slate-400" />
+                <input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} className="w-full bg-transparent text-sm font-medium outline-none" placeholder="부품명 또는 모델 검색" />
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshPrices()}
+                disabled={isPriceLoading}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isPriceLoading ? "animate-spin" : ""}`} />
+                {isPriceLoading ? "가격 조회 중.." : "가격 새로고침"}
+              </button>
             </div>
+            <p className="mb-6 text-[11px] font-medium text-slate-500">
+              {lastCheckedAt
+                ? `실시간 가격 기준 ${new Date(lastCheckedAt).toLocaleTimeString("ko-KR", {
+                    hour: "2-digit",
+                    minute: "2-digit"
+                  })} · 다나와 기준, 지마켓은 검색 바로가기를 제공합니다.`
+                : "다나와 실시간 가격을 불러오고 있습니다."}
+            </p>
 
             <div className="grid gap-3 sm:grid-cols-2">
                {filteredItems.map(part => (
                  <article key={part.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-4 transition-all hover:border-blue-200 hover:shadow-lg group">
                     <div className="flex items-start justify-between">
                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500 uppercase">{part.category}</span>
-                       <span className="text-sm font-black text-slate-900">{part.price.toLocaleString()}원</span>
+                       <div className="text-right">
+                         <span className="block text-sm font-black text-slate-900">{part.price.toLocaleString()}원</span>
+                         <span className="block text-[10px] font-bold text-emerald-600">{livePartQuotes[part.id]?.status === "live" ? "실시간가" : "기준가"}</span>
+                       </div>
                     </div>
                     <h4 className="mt-3 text-sm font-extrabold text-slate-800 leading-tight grow">{part.name}</h4>
                     <p className="mt-1 text-[11px] text-slate-500">{part.description}</p>
                     
                     <div className="mt-4 flex gap-2">
-                      <button onClick={() => openDanawa(part.name)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50 transition-all">
+                      <button onClick={() => openDanawa(part.id, part.name)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50 transition-all">
                         다나와
+                      </button>
+                      <button onClick={() => openGmarket(part.id, part.name)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50 transition-all">
+                        지마켓
                       </button>
                       <button onClick={() => addToBasket(part)} className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 text-[11px] font-bold text-white hover:bg-blue-700 transition-all">
                         담기

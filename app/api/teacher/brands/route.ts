@@ -1,29 +1,37 @@
 import { NextResponse } from "next/server";
 
-const BRANDS_URL = process.env.FLIPEDU_BRANDS_URL ?? "https://dev.flipedu.net/api/v2/vllist/brands";
+const BRANDS_URL = process.env.FLIPEDU_BRANDS_URL ?? "https://www.flipedu.net/api/v2/partners";
 
-type ValueLabelItem = {
-  value?: string;
-  label1?: string;
-  label2?: string | null;
+type PartnerPayload = {
+  sysSeq?: string | number;
+  brandNo?: string | number;
+  brandNm?: string | null;
+  name?: string | null;
 };
 
-function normalizeItems(payload: unknown) {
-  if (!Array.isArray(payload)) return [];
+type AcademyItem = {
+  value: string;
+  label1: string;
+  label2: string | null;
+  sysSeq: string;
+};
 
-  return payload
+function normalizeItems(payload: unknown, fallbackName: string): AcademyItem[] {
+  const source = Array.isArray(payload) ? payload : payload && typeof payload === "object" ? [payload] : [];
+
+  return source
     .map((item) => {
       if (!item || typeof item !== "object") return null;
 
-      const value = String((item as ValueLabelItem).value ?? "").trim();
-      const label1 = String((item as ValueLabelItem).label1 ?? "").trim();
-      const label2Raw = (item as ValueLabelItem).label2;
-      const label2 = typeof label2Raw === "string" && label2Raw.trim() ? label2Raw.trim() : null;
+      const typedItem = item as PartnerPayload;
+      const value = String(typedItem.brandNo ?? "").trim();
+      const label1 = String(typedItem.brandNm ?? typedItem.name ?? fallbackName).trim();
+      const sysSeq = String(typedItem.sysSeq ?? "").trim();
 
-      if (!value || !label1) return null;
-      return { value, label1, label2 };
+      if (!value || !label1 || !sysSeq) return null;
+      return { value, label1, label2: null, sysSeq };
     })
-    .filter((item): item is { value: string; label1: string; label2: string | null } => Boolean(item));
+    .filter((item): item is AcademyItem => Boolean(item));
 }
 
 export async function GET(request: Request) {
@@ -35,7 +43,7 @@ export async function GET(request: Request) {
   }
 
   const upstreamUrl = new URL(BRANDS_URL);
-  upstreamUrl.searchParams.set("brandNm", query);
+  upstreamUrl.searchParams.set("name", query);
 
   let upstreamResponse: Response;
 
@@ -59,8 +67,8 @@ export async function GET(request: Request) {
   }
 
   if (!upstreamResponse.ok) {
-    return NextResponse.json({ message: "학원 목록 조회에 실패했습니다." }, { status: upstreamResponse.status });
+    return NextResponse.json({ message: "학원 조회에 실패했습니다." }, { status: upstreamResponse.status });
   }
 
-  return NextResponse.json({ items: normalizeItems(payload) });
+  return NextResponse.json({ items: normalizeItems(payload, query) });
 }

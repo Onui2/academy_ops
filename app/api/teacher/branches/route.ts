@@ -1,43 +1,56 @@
 import { NextResponse } from "next/server";
 
-const BRANCHES_URL = process.env.FLIPEDU_BRANCHES_URL ?? "https://dev.flipedu.net/api/v2/vllist/branches";
+const BRANCHES_URL = process.env.FLIPEDU_BRANCHES_URL ?? "https://www.flipedu.net/api/v2/branches";
 
-type ValueLabelItem = {
-  value?: string;
-  label1?: string;
-  label2?: string | null;
+type BranchPayload = {
+  id?: string | number;
+  name?: string | null;
 };
 
-function normalizeItems(payload: unknown) {
-  if (!Array.isArray(payload)) return [];
+type BranchEnvelope = {
+  value?: unknown;
+};
 
-  return payload
+type BranchItem = {
+  value: string;
+  label1: string;
+  label2: string | null;
+};
+
+function normalizeItems(payload: unknown): BranchItem[] {
+  const values =
+    payload && typeof payload === "object" && !Array.isArray(payload) && Array.isArray((payload as BranchEnvelope).value)
+      ? ((payload as BranchEnvelope).value as unknown[])
+      : Array.isArray(payload)
+        ? payload
+        : [];
+
+  return values
     .map((item) => {
       if (!item || typeof item !== "object") return null;
 
-      const value = String((item as ValueLabelItem).value ?? "").trim();
-      const label1 = String((item as ValueLabelItem).label1 ?? "").trim();
-      const label2Raw = (item as ValueLabelItem).label2;
-      const label2 = typeof label2Raw === "string" && label2Raw.trim() ? label2Raw.trim() : null;
+      const typedItem = item as BranchPayload;
+      const value = String(typedItem.id ?? "").trim();
+      const label1 = String(typedItem.name ?? "").trim();
 
       if (!value || !label1) return null;
-      return { value, label1, label2 };
+      return { value, label1, label2: null };
     })
-    .filter((item): item is { value: string; label1: string; label2: string | null } => Boolean(item));
+    .filter((item): item is BranchItem => Boolean(item));
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const brandNo = url.searchParams.get("brandNo")?.trim() ?? "";
-  const brandName = url.searchParams.get("brandName")?.trim() ?? "";
+  const sysSeq = url.searchParams.get("sysSeq")?.trim() ?? "";
+  const brand = url.searchParams.get("brand")?.trim() ?? "";
 
-  if (!brandNo && !brandName) {
+  if (!sysSeq || !brand) {
     return NextResponse.json({ items: [] });
   }
 
   const upstreamUrl = new URL(BRANCHES_URL);
-  if (brandNo) upstreamUrl.searchParams.set("brandNo", brandNo);
-  if (brandName) upstreamUrl.searchParams.set("brandNm", brandName);
+  upstreamUrl.searchParams.set("sys", sysSeq);
+  upstreamUrl.searchParams.set("brand", brand);
 
   let upstreamResponse: Response;
 
@@ -61,7 +74,7 @@ export async function GET(request: Request) {
   }
 
   if (!upstreamResponse.ok) {
-    return NextResponse.json({ message: "지점 목록 조회에 실패했습니다." }, { status: upstreamResponse.status });
+    return NextResponse.json({ message: "지점 조회에 실패했습니다." }, { status: upstreamResponse.status });
   }
 
   return NextResponse.json({ items: normalizeItems(payload) });
