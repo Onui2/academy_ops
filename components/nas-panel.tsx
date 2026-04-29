@@ -1,7 +1,14 @@
 import { HardDrive, LockKeyhole, Wifi } from "lucide-react";
-import { nasMetrics } from "@/lib/ops-data";
+import type { NasMetric } from "@/types/ops";
 
-const healthClasses = {
+const nasMetrics: NasMetric[] = [
+  { label: "전체 용량", value: "32TB", detail: "24TB 사용 중 (75%)", health: "정상" },
+  { label: "활성 사용자", value: "142명", detail: "현재 접속 18명", health: "정상" },
+  { label: "시스템 상태", value: "Optimal", detail: "CPU 12%, RAM 45%", health: "정상" },
+  { label: "백업 상태", value: "성공", detail: "오늘 오전 03:00 완료", health: "정상" }
+];
+
+const healthClasses: Record<NasMetric["health"], string> = {
   정상: "bg-emerald-100 text-emerald-800",
   주의: "bg-amber-100 text-amber-800",
   위험: "bg-rose-100 text-rose-800"
@@ -19,7 +26,7 @@ export function NasPanel() {
       </div>
 
       <div className="mt-4 space-y-3">
-        {nasMetrics.map((metric) => (
+        {nasMetrics.map((metric: NasMetric) => (
           <div key={metric.label} className="rounded border border-border p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-semibold">{metric.label}</span>

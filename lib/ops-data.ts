@@ -9,7 +9,7 @@ import {
   Search,
   ShieldCheck
 } from "lucide-react";
-import type { BasketItem, EquipmentPart, EquipmentPreset, ModuleSummary, WorkItem } from "@/types/ops";
+import type { EquipmentPart, EquipmentPreset, ModuleSummary, WorkItem } from "@/types/ops";
 
 export const partsCategories = [
   { id: "PC", name: "데스크톱 부품", icon: HardDrive, items: ["CPU", "RAM", "SSD", "Graphic Card", "Mainboard", "Power", "Case", "Monitor"] },
@@ -204,3 +204,4 @@ export const equipmentPresets: EquipmentPreset[] = [
     }
   }
 ];
+

@@ -13,7 +13,6 @@ import {
   Filter,
   FolderOpen,
   HardDrive,
-  Headphones,
   Home,
   LogOut,
   PackageCheck,
@@ -910,7 +909,7 @@ export function OpsConsole() {
               {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
               {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
               {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} setActiveMenu={setActiveMenu} /> : null}
-              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} partsBasket={partsBasket} setPartsBasket={setPartsBasket} /> : null}
+              {activeMenu === "parts" ? <PartsScreen addRequest={addRequest} setActiveMenu={setActiveMenu} partsBasket={partsBasket} setPartsBasket={setPartsBasket} addToast={addToast} /> : null}
               {activeMenu === "tablet" ? <TabletScreen tablet={tablet} setTablet={setTablet} createTabletRequest={createTabletRequest} role={role} /> : null}
               {activeMenu === "as" ? <AsScreen symptom={symptom} setSymptom={setSymptom} diagnosis={diagnosis.answer} createAsTicket={createAsTicket} /> : null}
               {activeMenu === "nas" ? (
@@ -2674,7 +2673,19 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
   );
 }
 
-function PartsScreen({ addRequest, setActiveMenu, partsBasket, setPartsBasket }: { addRequest: (r: Omit<WorkItem, "id">) => void; setActiveMenu: (m: MenuKey) => void; partsBasket: BasketItem[]; setPartsBasket: (v: BasketItem[]) => void }) {
+function PartsScreen({
+  addRequest,
+  setActiveMenu,
+  partsBasket,
+  setPartsBasket,
+  addToast
+}: {
+  addRequest: (r: Omit<WorkItem, "id">) => void;
+  setActiveMenu: (m: MenuKey) => void;
+  partsBasket: BasketItem[];
+  setPartsBasket: (v: BasketItem[]) => void;
+  addToast: (message: string, type?: "success" | "error" | "info") => void;
+}) {
   const [partQuery, setPartQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
@@ -2683,7 +2694,7 @@ function PartsScreen({ addRequest, setActiveMenu, partsBasket, setPartsBasket }:
     if (selectedCategory) {
       const catObj = partsCategories.find(c => c.id === selectedCategory);
       if (catObj) {
-        result = result.filter(p => catObj.items.includes(p.category));
+        result = result.filter(p => (catObj.items as readonly string[]).includes(p.category));
       }
     }
     if (partQuery) {
@@ -2699,7 +2710,7 @@ function PartsScreen({ addRequest, setActiveMenu, partsBasket, setPartsBasket }:
     setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
   };
 
-  const removeFromBasket = (id: number) => {
+  const removeFromBasket = (id: BasketItem["id"]) => {
     setPartsBasket(partsBasket.filter(p => p.id !== id));
   };
 

@@ -62,7 +62,7 @@ export type EquipmentPart = {
   price: number;
   description: string;
   performanceNote: string;
-  tier: "기본" | "업무용" | "고성능";
+  tier: "기본" | "업무용" | "고성능" | "소모품";
 };
 
 export type EquipmentConfig = {
@@ -78,7 +78,7 @@ export type EquipmentPreset = {
 };
 
 export type BasketItem = {
-  id: number;
+  id: number | string;
   category: string;
   name: string;
   price: number;

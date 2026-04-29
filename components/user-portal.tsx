@@ -118,6 +118,12 @@ const asFaqCategories = [
   }
 ] as const;
 
+const addToast = (message: string, type: "success" | "error" | "info" = "info") => {
+  // Simple toast implementation using alert for now, or console
+  console.log(`[${type.toUpperCase()}] ${message}`);
+  // In a real app, this would trigger a toast UI component
+};
+
 export function UserPortal() {
   const [draft, setDraft] = useState<RequestDraft>({
     category: "other",
@@ -137,7 +143,11 @@ export function UserPortal() {
   const [recentSubmission, setRecentSubmission] = useState<WorkItem | null>(null);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
   const [symptomQuery, setSymptomQuery] = useState("");
-  const [diagnosis, setDiagnosis] = useState<{ diagnosis: string; solution: string[]; original: { keyword: string; category: string; answer: string } } | null>(null);
+  const [diagnosis, setDiagnosis] = useState<{
+    diagnosis: string;
+    solution: string[];
+    original: { id: string; keyword: string; category: string; answer: string; escalation_required: boolean };
+  } | null>(null);
   const [partsBasket, setPartsBasket] = useState<BasketItem[]>([]);
   const [partQuery, setPartQuery] = useState("");
   const [selectedPartCategory, setSelectedPartCategory] = useState<string | null>(null);
@@ -231,12 +241,14 @@ export function UserPortal() {
     }
   }, [symptomQuery, draft.category, dbFaqs]);
 
+  const desktopPartCategories = partsCategories.find((category) => category.id === "PC")?.items ?? [];
+
   const filteredParts = useMemo(() => {
     let result = equipmentParts;
     if (selectedPartCategory) {
       const catObj = partsCategories.find((c) => c.id === selectedPartCategory);
       if (catObj) {
-        result = result.filter((p) => catObj.items.includes(p.category));
+        result = result.filter((p) => (catObj.items as readonly string[]).includes(p.category));
       }
     }
     if (selectedSubCategory) {
@@ -254,7 +266,7 @@ export function UserPortal() {
     setPartsBasket([...partsBasket, { ...part, id: Date.now() + Math.random() }]);
   };
 
-  const removeFromBasket = (id: number) => {
+  const removeFromBasket = (id: BasketItem["id"]) => {
     setPartsBasket(partsBasket.filter((p) => p.id !== id));
   };
 
@@ -305,7 +317,7 @@ export function UserPortal() {
     }
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
-  }, [draft.category]);
+  }, [draft.category, draft.requestItem]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
   const estimatedOwner = draft.category === "nas" ? "NAS 관리자" : draft.category === "as" ? "전산" : "학원 관리자";
   const defaultTitle = ["equipment", "as"].includes(draft.category) ? selected.title : `${selected.title} 요청`;
@@ -681,17 +693,17 @@ export function UserPortal() {
 
                       {/* Large Card-style Category Selection */}
                       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
-                        {draft.requestItem === "데스크톱" ? (
-                          partsCategories.find(c => c.id === "PC")?.items.map((sub) => {
+                        {draft.requestItem === "데스크톱"
+                          ? desktopPartCategories.map((sub) => {
                             const active = selectedSubCategory === sub;
                             let Icon = Cpu;
                             if (sub === "RAM") Icon = MemoryStick;
                             if (sub === "SSD") Icon = Database;
                             if (sub === "Monitor") Icon = MonitorIcon;
-                            if (sub === "Keyboard") Icon = KeyboardIcon;
-                            if (sub === "Mouse") Icon = MousePointer2;
-                            if (sub === "Cables") Icon = Usb;
-                            if (sub === "Power" || sub === "Mainboard" || sub === "Case" || sub === "Graphic Card") Icon = HardDrive;
+                            if ((sub as string) === "Keyboard") Icon = KeyboardIcon;
+                            if ((sub as string) === "Mouse") Icon = MousePointer2;
+                            if ((sub as string) === "Cables") Icon = Usb;
+                            if (["Power", "Mainboard", "Case", "Graphic Card"].includes(sub as string)) Icon = HardDrive;
 
                             return (
                               <button
@@ -706,24 +718,24 @@ export function UserPortal() {
                               </button>
                             );
                           })
-                        ) : draft.requestItem === "소모품/주변기기" ? (
-                          partsCategories.map((cat) => {
-                            const active = selectedPartCategory === cat.id;
-                            const Icon = cat.icon;
-                            return (
-                              <button
-                                key={cat.id}
-                                onClick={() => setSelectedPartCategory(active ? null : cat.id)}
-                                className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"}`}
-                              >
-                                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
-                                  <Icon className="h-4 w-4" />
-                                </div>
-                                <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{cat.name}</span>
-                              </button>
-                            );
-                          })
-                        ) : null}
+                          : draft.requestItem === "소모품/주변기기"
+                            ? partsCategories.map((cat) => {
+                                const active = selectedPartCategory === cat.id;
+                                const Icon = cat.icon;
+                                return (
+                                  <button
+                                    key={cat.id}
+                                    onClick={() => setSelectedPartCategory(active ? null : cat.id)}
+                                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"}`}
+                                  >
+                                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                      <Icon className="h-4 w-4" />
+                                    </div>
+                                    <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{cat.name}</span>
+                                  </button>
+                                );
+                              })
+                            : null}
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
