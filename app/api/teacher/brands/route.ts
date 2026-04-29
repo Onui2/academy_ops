@@ -19,19 +19,17 @@ type AcademyItem = {
 function normalizeItems(payload: unknown, fallbackName: string): AcademyItem[] {
   const source = Array.isArray(payload) ? payload : payload && typeof payload === "object" ? [payload] : [];
 
-  return source
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
+  return source.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
 
-      const typedItem = item as PartnerPayload;
-      const value = String(typedItem.brandNo ?? "").trim();
-      const label1 = String(typedItem.brandNm ?? typedItem.name ?? fallbackName).trim();
-      const sysSeq = String(typedItem.sysSeq ?? "").trim();
+    const typedItem = item as PartnerPayload;
+    const value = String(typedItem.brandNo ?? "").trim();
+    const label1 = String(typedItem.brandNm ?? typedItem.name ?? fallbackName).trim();
+    const sysSeq = String(typedItem.sysSeq ?? "").trim();
 
-      if (!value || !label1 || !sysSeq) return null;
-      return { value, label1, label2: null, sysSeq };
-    })
-    .filter((item): item is AcademyItem => Boolean(item));
+    if (!value || !label1 || !sysSeq) return [];
+    return [{ value, label1, label2: null, sysSeq }];
+  });
 }
 
 export async function GET(request: Request) {

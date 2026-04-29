@@ -31,7 +31,7 @@ import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
 import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-data";
 import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
 import { useLivePartPrices } from "@/lib/use-live-part-prices";
-import type { BasketItem, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
+import type { BasketItem, EquipmentPart, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
 
 type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "parts" | "other";
 
@@ -302,14 +302,14 @@ export function UserPortal() {
     );
   }, [livePartQuotes]);
 
-  const addToBasket = (part: Omit<BasketItem, "id">) => {
-    const quote = livePartQuotes[part.id as string];
+  const addToBasket = (part: EquipmentPart) => {
+    const quote = livePartQuotes[part.id];
     setPartsBasket([
       ...partsBasket,
       {
         ...part,
         id: Date.now() + Math.random(),
-        partId: part.id as string,
+        partId: part.id,
         priceSource: quote?.source,
         checkedAt: quote?.checkedAt
       }
@@ -414,8 +414,6 @@ export function UserPortal() {
 
     const amount = (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
 
-    let resultItem: WorkItem | null = null;
-
     if (draft.resubmitId) {
       try {
         const existing = submitted.find(s => s.id === draft.resubmitId);
@@ -437,7 +435,6 @@ export function UserPortal() {
           } else {
             updateInAdminQueue(updated);
           }
-          resultItem = updated;
           pushToast("보류 요청을 다시 접수했습니다.", "success");
         }
       } catch (error) {
@@ -481,7 +478,6 @@ export function UserPortal() {
         } else {
           pushToAdminQueue(item);
         }
-        resultItem = item;
         pushToast(`${item.id} 요청이 접수되었습니다.`, "success");
       } catch (error) {
         pushToast(error instanceof Error ? error.message : "요청 접수 중 오류가 발생했습니다.", "error");

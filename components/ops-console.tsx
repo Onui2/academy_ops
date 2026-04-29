@@ -52,7 +52,7 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
-import type { BasketItem, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
+import type { BasketItem, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
 type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly";
@@ -603,8 +603,8 @@ export function OpsConsole() {
     addToast("요청이 삭제되었습니다.", "info");
   };
 
-  const createManualRequest = async () => {
-    if (!form.title.trim()) return;
+  const createManualRequest = async (): Promise<WorkItem | null> => {
+    if (!form.title.trim()) return null;
     const created = await addRequest({
       module: form.module,
       title: form.title,
@@ -628,7 +628,7 @@ export function OpsConsole() {
       source: "admin_console"
     });
     setForm(defaultForm);
-    return created;
+    return created ?? null;
   };
 
   const createEquipment = () => {
@@ -1160,6 +1160,9 @@ function QueueScreen(props: {
   approve: (item: WorkItem) => void;
   reject: (item: WorkItem) => void;
   remove: (id: string) => void;
+  form: RequestForm;
+  setForm: (value: RequestForm) => void;
+  createManualRequest: () => Promise<WorkItem | null>;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -1879,7 +1882,7 @@ function extractAmountValue(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void }) {
+function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void | Promise<void> }) {
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -2754,14 +2757,14 @@ function PartsScreen({
     return result;
   }, [partQuery, parts, selectedCategory]);
 
-  const addToBasket = (part: Omit<BasketItem, "id">) => {
-    const quote = livePartQuotes[part.id as string];
+  const addToBasket = (part: EquipmentPart) => {
+    const quote = livePartQuotes[part.id];
     setPartsBasket([
       ...partsBasket,
       {
         ...part,
         id: Date.now() + Math.random(),
-        partId: part.id as string,
+        partId: part.id,
         priceSource: quote?.source,
         checkedAt: quote?.checkedAt
       }

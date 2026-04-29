@@ -25,18 +25,16 @@ function normalizeItems(payload: unknown): BranchItem[] {
         ? payload
         : [];
 
-  return values
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
+  return values.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
 
-      const typedItem = item as BranchPayload;
-      const value = String(typedItem.id ?? "").trim();
-      const label1 = String(typedItem.name ?? "").trim();
+    const typedItem = item as BranchPayload;
+    const value = String(typedItem.id ?? "").trim();
+    const label1 = String(typedItem.name ?? "").trim();
 
-      if (!value || !label1) return null;
-      return { value, label1, label2: null };
-    })
-    .filter((item): item is BranchItem => Boolean(item));
+    if (!value || !label1) return [];
+    return [{ value, label1, label2: null }];
+  });
 }
 
 export async function GET(request: Request) {
