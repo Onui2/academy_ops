@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Bot,
   CheckCircle2,
+  ClipboardList,
   HardDrive,
   HelpCircle,
   Laptop,
@@ -143,7 +144,77 @@ type ToastItem = {
   type: "success" | "error" | "info";
 };
 
+const portalWorkflowSteps = [
+  {
+    title: "1. 요청 접수",
+    description: "학원, 장비, 증상, 긴급도를 정리해 운영팀으로 전달합니다."
+  },
+  {
+    title: "2. 운영팀 분류",
+    description: "장비 구매, A/S, NAS, 태블릿 중 담당 흐름으로 자동 분기됩니다."
+  },
+  {
+    title: "3. 검토 및 보완",
+    description: "정보가 부족하면 보류로 돌아오고, 충분하면 바로 담당자에게 넘어갑니다."
+  },
+  {
+    title: "4. 처리 완료",
+    description: "진행과 완료 상태는 내 접수 현황에서 계속 확인할 수 있습니다."
+  }
+] as const;
+
+const categoryWorkflowGuide: Record<
+  Category,
+  {
+    eta: string;
+    checklist: string[];
+    tips: string[];
+  }
+> = {
+  equipment: {
+    eta: "예산/수량 확인이 필요하면 승인 대기까지 1~2단계가 더 생길 수 있습니다.",
+    checklist: ["필요 수량", "설치 장소", "언제부터 써야 하는지", "기존 장비 교체 여부"],
+    tips: ["데스크톱은 예상 사양이나 용도를 적으면 견적 왕복이 줄어듭니다.", "소모품은 정확한 모델명까지 적으면 재확인이 빨라집니다."]
+  },
+  as: {
+    eta: "자가 진단으로 안 풀리면 운영팀 분류 후 업체 또는 전산 담당으로 연결됩니다.",
+    checklist: ["증상 발생 위치", "언제부터 문제인지", "화면/에러 문구", "이미 시도한 조치"],
+    tips: ["같은 증상이 반복되면 사진이나 영상 한 장이 가장 도움이 됩니다.", "수업 직전 장애면 긴급 사유를 꼭 함께 적어주세요."]
+  },
+  nas: {
+    eta: "권한 생성, 폴더 확인, 계정 안내 순서로 처리됩니다.",
+    checklist: ["사용자 이메일", "필요한 폴더명", "읽기/쓰기 권한", "언제까지 필요한지"],
+    tips: ["신규 입사자는 이름보다 이메일을 적는 편이 정확합니다.", "읽기만 필요한지 쓰기까지 필요한지 구분해 주세요."]
+  },
+  tablet: {
+    eta: "대여 가능 재고와 사용 기간 확인 후 승인 또는 배정으로 넘어갑니다.",
+    checklist: ["필요 대수", "사용 시작일", "사용 기간", "사용 목적"],
+    tips: ["반납 일정이 보이면 배정 속도가 더 빨라집니다.", "단기 행사면 행사명도 같이 적어주세요."]
+  },
+  other: {
+    eta: "운영팀이 먼저 분류한 뒤 적절한 담당에게 넘깁니다.",
+    checklist: ["문제 요약", "장소", "필요 시점", "영향 범위"],
+    tips: ["모르는 요청이라도 장소와 급한 이유만 있으면 분류 속도가 빨라집니다.", "업무 중단 여부를 적어두면 우선순위 판단에 도움이 됩니다."]
+  },
+  network: {
+    eta: "현장 점검이나 공유기/회선 확인이 필요하면 A/S 흐름으로 연결됩니다.",
+    checklist: ["발생 위치", "영향 인원", "유선/무선 여부", "반복 시간대"],
+    tips: ["인터넷 끊김은 특정 교실인지 전체인지 꼭 적어주세요.", "가능하면 공유기 재부팅 여부를 함께 남겨주세요."]
+  },
+  parts: {
+    eta: "부품 재고와 구매 여부 확인 후 운영팀 요청 큐로 올라갑니다.",
+    checklist: ["필요 부품명", "수량", "사용 장비 모델", "예상 사용일"],
+    tips: ["호환이 필요한 부품은 기존 장비 모델명을 같이 적어주세요.", "한 번에 필요한 품목을 함께 담으면 처리 횟수가 줄어듭니다."]
+  },
+  software: {
+    eta: "계정 생성이나 라이선스 확인이 필요하면 운영팀 검토 후 배정됩니다.",
+    checklist: ["프로그램명", "사용자", "필요 기능", "사용 시작일"],
+    tips: ["기존 계정이 있는지 먼저 적어주면 중복 생성이 줄어듭니다.", "라이선스가 필요한 프로그램은 사용 인원도 함께 적어주세요."]
+  }
+};
+
 export function UserPortal() {
+  const [activeSection, setActiveSection] = useState<"request-start" | "request-status" | "request-workflow" | "request-help">("request-start");
   const [draft, setDraft] = useState<RequestDraft>({
     category: "other",
     requestItem: undefined,
@@ -186,6 +257,35 @@ export function UserPortal() {
     [livePartQuotes]
   );
   const submittedQueue = useMemo(() => [...submitted].sort((left, right) => right.id.localeCompare(left.id)), [submitted]);
+  const queueSummary = useMemo(() => {
+    const needsAction = submittedQueue.filter((item) => normalizeStatus(item.status) === "보류").length;
+    const inProgress = submittedQueue.filter((item) => {
+      const status = normalizeStatus(item.status);
+      return status === "진행" || status === "진행 중";
+    }).length;
+    const waiting = submittedQueue.filter((item) => {
+      const status = normalizeStatus(item.status);
+      return status === "접수" || status === "승인 대기" || status === "검토";
+    }).length;
+    const completed = submittedQueue.filter((item) => normalizeStatus(item.status) === "완료").length;
+
+    return {
+      total: submittedQueue.length,
+      needsAction,
+      inProgress,
+      waiting,
+      completed
+    };
+  }, [submittedQueue]);
+  const highlightedItems = useMemo(
+    () =>
+      submittedQueue.filter((item) => {
+        const status = normalizeStatus(item.status);
+        return status === "보류" || status === "승인 대기" || status === "진행" || status === "진행 중";
+      }),
+    [submittedQueue]
+  );
+  const currentWorkflowGuide = categoryWorkflowGuide[draft.category];
 
   const pushToast = useCallback((message: string, type: ToastItem["type"] = "info") => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -493,10 +593,12 @@ export function UserPortal() {
       resubmitId: item.id
     });
 
+    setActiveSection("request-start");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
+  const SelectedIcon = selected.icon;
   const helperText = useMemo(() => {
     if (draft.category === "as") return "가능하면 장비명, 위치, 증상 사진, 언제부터 발생했는지를 적어주세요.";
     if (draft.category === "nas") return "사용자 이메일, 필요한 폴더, 읽기/쓰기 권한을 적어주세요.";
@@ -644,6 +746,8 @@ export function UserPortal() {
     }
 
     await loadHistory();
+    setActiveSection("request-status");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
     setPartsBasket([]);
     setFiles([]);
@@ -652,6 +756,14 @@ export function UserPortal() {
     setDiagnosis(null);
     setIsLoading(false);
   };
+
+  const changeSection = useCallback(
+    (sectionId: "request-start" | "request-status" | "request-workflow" | "request-help") => {
+      setActiveSection(sectionId);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    []
+  );
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -670,53 +782,173 @@ export function UserPortal() {
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[1560px] gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <section className="grid content-start gap-6 self-start">
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
-            <p className="mt-1 text-sm text-gray-500">카테고리를 고르고 요청 내용을 적으면 운영팀으로 전달됩니다.</p>
-            <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
-              {categories.map((item) => {
+      <div className="mx-auto grid w-full max-w-[1560px] gap-6 px-4 py-6 lg:grid-cols-[230px_minmax(0,1fr)_260px]">
+        <aside className="hidden lg:block">
+          <div className="sticky top-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Portal Menu</p>
+            <h2 className="mt-2 text-lg font-black text-slate-900">사용자 업무 메뉴</h2>
+            <div className="mt-4 grid gap-2">
+              {[
+                {
+                  id: "request-start" as const,
+                  title: "새 요청 작성",
+                  desc: "장비, NAS, A/S 요청 접수",
+                  count: categories.length,
+                  icon: Megaphone
+                },
+                {
+                  id: "request-status" as const,
+                  title: "내 접수 현황",
+                  desc: "보류, 진행, 완료 상태 확인",
+                  count: queueSummary.total,
+                  icon: ClipboardList
+                },
+                {
+                  id: "request-workflow" as const,
+                  title: "처리 흐름",
+                  desc: "담당 배정과 승인 흐름 안내",
+                  count: highlightedItems.length,
+                  icon: Bot
+                },
+                {
+                  id: "request-help" as const,
+                  title: "빠른 해결",
+                  desc: "보류 줄이는 작성 팁과 자가 해결",
+                  count: samples.length,
+                  icon: Search
+                }
+              ].map((item) => {
                 const Icon = item.icon;
-                const active = draft.category === item.id;
+                const active = activeSection === item.id;
                 return (
                   <button
                     key={item.id}
-                    onClick={() => {
-                      const newDraft = { ...draft, category: item.id };
-                      if (item.id === "equipment") {
-                        newDraft.requestItem = "데스크톱";
-                        setSelectedPartCategory("PC");
-                        setSelectedSubCategory("CPU");
-                      } else {
-                        setSelectedPartCategory(null);
-                        setSelectedSubCategory(null);
-                      }
-                      setDraft(newDraft);
-                    }}
-                    className={`rounded-lg border px-4 py-3 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                    type="button"
+                    onClick={() => changeSection(item.id)}
+                    className={`rounded-2xl border px-4 py-3 text-left transition ${
+                      active ? "border-blue-300 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                    }`}
                   >
-                    <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.tone}`}>
-                      <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                    <div className="flex items-start gap-3">
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-black text-slate-900">{item.title}</p>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${active ? "bg-white text-blue-700" : "bg-slate-100 text-slate-500"}`}>
+                            {item.count}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">{item.desc}</p>
+                      </div>
                     </div>
-                    <p className="mt-2.5 whitespace-nowrap text-sm font-bold">{item.title}</p>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{item.desc}</p>
                   </button>
                 );
               })}
             </div>
+
+            <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4">
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">이번 주 알림</p>
+              <div className="mt-3 grid gap-2 text-sm text-slate-700">
+                <p>보완 필요: <span className="font-black text-rose-600">{queueSummary.needsAction}</span></p>
+                <p>처리 중: <span className="font-black text-blue-700">{queueSummary.inProgress}</span></p>
+                <p>완료: <span className="font-black text-emerald-600">{queueSummary.completed}</span></p>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section className="grid content-start gap-6 self-start">
+          <div className="overflow-x-auto lg:hidden">
+            <div className="flex min-w-max gap-2 pb-1">
+              {[
+                { id: "request-start" as const, label: "새 요청" },
+                { id: "request-status" as const, label: "내 접수 현황" },
+                { id: "request-workflow" as const, label: "처리 흐름" },
+                { id: "request-help" as const, label: "빠른 해결" }
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => changeSection(item.id)}
+                  className={`rounded-full border px-4 py-2 text-sm font-bold ${
+                    activeSection === item.id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {activeSection === "request-start" ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
+              <p className="mt-1 text-sm text-gray-500">카테고리를 고르고 요청 내용을 적으면 운영팀으로 전달됩니다.</p>
+              <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
+                {categories.map((item) => {
+                  const Icon = item.icon;
+                  const active = draft.category === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        const newDraft = { ...draft, category: item.id };
+                        if (item.id === "equipment") {
+                          newDraft.requestItem = "데스크톱";
+                          setSelectedPartCategory("PC");
+                          setSelectedSubCategory("CPU");
+                        } else {
+                          setSelectedPartCategory(null);
+                          setSelectedSubCategory(null);
+                        }
+                        setDraft(newDraft);
+                      }}
+                      className={`rounded-lg border px-4 py-3 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                    >
+                      <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.tone}`}>
+                        <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                      </div>
+                      <p className="mt-2.5 whitespace-nowrap text-sm font-bold">{item.title}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{item.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === "request-status" ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Request Queue</p>
-                <h2 className="mt-1 text-xl font-black text-slate-900">내 요청 큐</h2>
-                <p className="mt-1 text-sm text-slate-500">접수한 요청을 여기서 한 번에 보고, 보류된 건은 바로 수정해서 다시 올릴 수 있습니다.</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">My Request Board</p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">내 접수 현황</h2>
+                <p className="mt-1 text-sm text-slate-500">접수한 요청을 한 번에 보고, 보류된 건은 바로 수정해서 다시 올릴 수 있습니다.</p>
               </div>
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-right">
                 <p className="text-[11px] font-bold text-blue-600">현재 요청</p>
                 <p className="mt-1 text-2xl font-black text-slate-900">{submittedQueue.length}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-[11px] font-bold text-slate-400">접수/검토 중</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{queueSummary.waiting}</p>
+              </div>
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4">
+                <p className="text-[11px] font-bold text-blue-600">진행 중</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{queueSummary.inProgress}</p>
+              </div>
+              <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
+                <p className="text-[11px] font-bold text-rose-600">보완 필요</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{queueSummary.needsAction}</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4">
+                <p className="text-[11px] font-bold text-emerald-600">완료</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{queueSummary.completed}</p>
               </div>
             </div>
 
@@ -783,11 +1015,13 @@ export function UserPortal() {
               </p>
             )}
           </section>
+          ) : null}
 
+          {activeSection === "request-start" ? (
           <section className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-3">
               <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${selected.tone}`}>
-                <selected.icon className="h-5 w-5" aria-hidden="true" />
+                <SelectedIcon className="h-5 w-5" aria-hidden="true" />
               </div>
               <div>
                 <h2 className="font-bold">{selected.title}</h2>
@@ -1187,6 +1421,158 @@ export function UserPortal() {
               </button>
             </div>
           </section>
+          ) : null}
+
+          {activeSection === "request-workflow" ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Workflow Guide</p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">처리 흐름 안내</h2>
+                <p className="mt-1 text-sm text-slate-500">지금 작성 중인 요청이 어떤 흐름으로 넘어가는지 미리 보면 보류를 줄일 수 있습니다.</p>
+              </div>
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                {currentWorkflowGuide.eta}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 xl:grid-cols-4">
+              {portalWorkflowSteps.map((step) => (
+                <article key={step.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-sm font-black text-slate-900">{step.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{step.description}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+              <article className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">현재 카테고리 체크리스트</p>
+                <h3 className="mt-2 text-lg font-black text-slate-900">{selected.title} 요청 전에 적어두면 좋은 내용</h3>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {currentWorkflowGuide.checklist.map((item) => (
+                    <div key={item} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {currentWorkflowGuide.tips.map((tip) => (
+                    <div key={tip} className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                      {tip}
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">우선 확인할 요청</p>
+                <h3 className="mt-2 text-lg font-black text-slate-900">보완 또는 진행 상태</h3>
+                <div className="mt-4 grid gap-3">
+                  {highlightedItems.length ? (
+                    highlightedItems.slice(0, 4).map((item) => (
+                      <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-slate-900">{item.title}</p>
+                            <p className="mt-1 text-xs text-slate-500">{item.id} · {normalizeStatus(item.status)}</p>
+                          </div>
+                          {normalizeStatus(item.status) === "보류" ? (
+                            <button
+                              type="button"
+                              onClick={() => loadForResubmit(item)}
+                              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+                            >
+                              보완하기
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                      아직 확인이 필요한 요청이 없습니다. 새 요청을 접수하면 여기서 진행 흐름을 볼 수 있습니다.
+                    </div>
+                  )}
+                </div>
+              </article>
+            </div>
+          </section>
+          ) : null}
+
+          {activeSection === "request-help" ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Quick Help</p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">빠른 해결과 접수 팁</h2>
+                <p className="mt-1 text-sm text-slate-500">사용자 입장에서 자주 막히는 부분을 먼저 해결하거나, 운영팀이 바로 처리하기 좋은 형태로 요청을 정리할 수 있습니다.</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-3">
+              <article className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-blue-600" aria-hidden="true" />
+                  <h3 className="font-black text-slate-900">바로 쓰는 요청 예시</h3>
+                </div>
+                <div className="mt-4 grid gap-2">
+                  {samples.map((sample) => (
+                    <button
+                      key={sample}
+                      type="button"
+                      onClick={() => {
+                        setDraft((current) => ({ ...current, title: sample }));
+                        changeSection("request-start");
+                      }}
+                      className="rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:border-blue-200 hover:bg-blue-50"
+                    >
+                      {sample}
+                    </button>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                  <h3 className="font-black text-slate-900">보류를 줄이는 작성 포인트</h3>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {[
+                    "장소를 교실명이나 층수까지 적기",
+                    "수량과 필요 날짜를 함께 적기",
+                    "장애면 사진이나 에러 문구 남기기",
+                    "긴급이면 영향 받는 수업/업무 범위 적기"
+                  ].map((item) => (
+                    <div key={item} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-violet-600" aria-hidden="true" />
+                  <h3 className="font-black text-slate-900">이럴 땐 바로 운영팀</h3>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {[
+                    "수업 직전 빔, 노트북, 인터넷이 멈췄을 때",
+                    "신규 입사자 NAS 권한이 오늘 바로 필요할 때",
+                    "행정 장비 교체로 업무가 중단된 상태일 때",
+                    "자가 진단을 했지만 같은 장애가 반복될 때"
+                  ].map((item) => (
+                    <div key={item} className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </div>
+          </section>
+          ) : null}
         </section>
 
         <aside className="grid gap-6 self-start">
@@ -1256,11 +1642,11 @@ export function UserPortal() {
           <section className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-green-600" aria-hidden="true" />
-              <h2 className="font-bold">내 접수 현황</h2>
+              <h2 className="font-bold">보완/진행 알림</h2>
             </div>
             <div className="mt-3 grid gap-2">
-              {submitted.length ? (
-                submitted.map((item) => (
+              {highlightedItems.length ? (
+                highlightedItems.slice(0, 4).map((item) => (
                   <div key={item.id} className={`rounded-lg border p-3 ${item.status === "보류" ? "border-rose-200 bg-rose-50" : "border-gray-200 bg-white"}`}>
                     <div className="flex items-start gap-2">
                       <CheckCircle2 className={`mt-0.5 h-4 w-4 ${item.status === "완료" ? "text-green-600" : item.status === "보류" ? "text-rose-600" : "text-blue-600"}`} aria-hidden="true" />
@@ -1283,7 +1669,7 @@ export function UserPortal() {
                   </div>
                 ))
               ) : (
-                <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">아직 접수한 요청이 없습니다.</p>
+                <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">지금 바로 확인이 필요한 요청이 없습니다.</p>
               )}
             </div>
           </section>

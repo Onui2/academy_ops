@@ -32,12 +32,43 @@ type TeacherSession = {
   profile: Record<string, unknown> | null;
 };
 
+type UpstreamAttemptResult = {
+  ok: boolean;
+  status: number;
+  payload: unknown;
+  token: string | null;
+};
+
 function encodeSession(session: TeacherSession) {
   return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
 }
 
 function encryptPassword(password: string) {
   return CryptoJS.AES.encrypt(password, TEACHER_PASSWORD_KEY).toString();
+}
+
+function extractToken(response: Response, payload: unknown) {
+  const headerToken =
+    response.headers.get("x-auth-token") ||
+    response.headers.get("authorization") ||
+    response.headers.get("Authorization");
+
+  if (headerToken) {
+    return headerToken.startsWith("Bearer ") ? headerToken.slice("Bearer ".length) : headerToken;
+  }
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    const tokenCandidate = [record.token, record.accessToken, record.access_token, record.jwt].find(
+      (value) => typeof value === "string" && value.trim().length > 0
+    );
+
+    if (typeof tokenCandidate === "string") {
+      return tokenCandidate;
+    }
+  }
+
+  return null;
 }
 
 function resolvePortalRole(username: string): "admin" | "user" {
@@ -83,6 +114,39 @@ function buildErrorMessage(status: number, payload: unknown) {
   return "teacher 로그인 요청에 실패했습니다.";
 }
 
+async function sendTeacherLoginRequest(
+  url: URL,
+  body: Record<string, string>
+): Promise<UpstreamAttemptResult> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/json",
+      Origin: url.origin,
+      Referer: `${url.origin}/`
+    },
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  let payload: unknown = null;
+
+  try {
+    payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  } catch {
+    payload = null;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+    token: extractToken(response, payload)
+  };
+}
+
 export async function POST(request: Request) {
   let body: Partial<TeacherLoginRequest> = {};
 
@@ -107,55 +171,75 @@ export async function POST(request: Request) {
     );
   }
 
-  let upstreamResponse: Response;
+  const url = new URL(TEACHER_LOGIN_URL);
+  const encryptedPassword = encryptPassword(payload.password);
+  const attempts: Array<Record<string, string>> = [
+    {
+      username: payload.username,
+      password: encryptedPassword,
+      sysSeq: payload.sysSeq,
+      brand: payload.brand,
+      branch: payload.branch
+    },
+    {
+      username: payload.username,
+      password: payload.password,
+      sysSeq: payload.sysSeq,
+      brand: payload.brand,
+      branch: payload.branch
+    },
+    {
+      username: payload.username,
+      password: encryptedPassword,
+      sys: payload.sysSeq,
+      brand: payload.brand,
+      branch: payload.branch
+    },
+    {
+      username: payload.username,
+      password: payload.password,
+      sys: payload.sysSeq,
+      brand: payload.brand,
+      branch: payload.branch
+    },
+    {
+      username: payload.username,
+      password: encryptedPassword,
+      sysSeq: payload.sysSeq,
+      brandNo: payload.brand,
+      branch: payload.branch
+    },
+    {
+      username: payload.username,
+      password: payload.password,
+      sysSeq: payload.sysSeq,
+      brandNo: payload.brand,
+      branch: payload.branch
+    }
+  ];
+
+  let upstreamResult: UpstreamAttemptResult | null = null;
 
   try {
-    const url = new URL(TEACHER_LOGIN_URL);
-    upstreamResponse = await fetch(TEACHER_LOGIN_URL, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-        Origin: url.origin,
-        Referer: `${url.origin}/`
-      },
-      body: JSON.stringify({
-        username: payload.username,
-        password: encryptPassword(payload.password),
-        sysSeq: payload.sysSeq,
-        brand: payload.brand,
-        branch: payload.branch
-      }),
-      cache: "no-store"
-    });
+    for (const attempt of attempts) {
+      const result = await sendTeacherLoginRequest(url, attempt);
+      upstreamResult = result;
+      if (result.ok && result.token) {
+        break;
+      }
+    }
   } catch {
     return NextResponse.json({ message: "인증 서버에 연결하지 못했습니다." }, { status: 502 });
   }
 
-  const contentType = upstreamResponse.headers.get("content-type") ?? "";
-  let upstreamPayload: unknown = null;
+  const token = upstreamResult?.token ?? null;
+  const upstreamPayload = upstreamResult?.payload ?? null;
+  const upstreamStatus = upstreamResult?.status ?? 502;
 
-  try {
-    upstreamPayload = contentType.includes("application/json")
-      ? await upstreamResponse.json()
-      : await upstreamResponse.text();
-  } catch {
-    upstreamPayload = null;
-  }
-
-  const token =
-    upstreamResponse.headers.get("x-auth-token") ||
-    (upstreamPayload &&
-    typeof upstreamPayload === "object" &&
-    !Array.isArray(upstreamPayload) &&
-    typeof (upstreamPayload as Record<string, unknown>).token === "string"
-      ? String((upstreamPayload as Record<string, unknown>).token)
-      : null);
-
-  if (!upstreamResponse.ok || !token) {
+  if (!upstreamResult?.ok || !token) {
     return NextResponse.json(
-      { message: buildErrorMessage(upstreamResponse.status, upstreamPayload) },
-      { status: upstreamResponse.ok ? 401 : upstreamResponse.status }
+      { message: buildErrorMessage(upstreamStatus, upstreamPayload) },
+      { status: upstreamResult?.ok ? 401 : upstreamStatus }
     );
   }
 
