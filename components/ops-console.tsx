@@ -128,16 +128,23 @@ type FaqCategory = {
   items: typeof diagnosisPatterns;
 };
 
+function extractCleanName(rawName: string) {
+  if (!rawName) return "운영자";
+  let name = rawName.replace(/[\{\[\(\<].*?[\}\]\)\>]/g, "");
+  name = name.replace(/[^가-힣a-zA-Z]/g, "");
+  return name.slice(0, 3) || "운영자";
+}
+
 const storageKey = "academy-ops-hub-state-v2";
 const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
 const teacherSessionPollMs = 15000;
 
 const roles: { value: UserRole; label: string }[] = [
   { value: "general", label: "일반" },
-  { value: "academy_admin", label: "학원 관리자" },
+  { value: "academy_admin", label: "학원 운영" },
   { value: "executive", label: "경영진" },
-  { value: "super_admin", label: "최고 관리자" },
-  { value: "nas_admin", label: "NAS 관리자" }
+  { value: "super_admin", label: "최고 운영(Ops)" },
+  { value: "nas_admin", label: "NAS 운영" }
 ];
 
 const menuItems: { key: MenuKey; label: string; icon: LucideIcon }[] = [
@@ -596,10 +603,12 @@ export function OpsConsole() {
 
   const userDisplayName = useMemo(() => {
     const teacherName = teacherSession?.profile?.name;
-    if (typeof teacherName === "string" && teacherName.trim()) return teacherName.trim();
-    if (teacherSession?.username?.trim()) return teacherSession.username.trim();
-    if (user?.user_metadata?.full_name) return user.user_metadata.full_name;
-    return user?.email?.split("@")[0] ?? "운영자";
+    let raw = "운영자";
+    if (typeof teacherName === "string" && teacherName.trim()) raw = teacherName.trim();
+    else if (teacherSession?.username?.trim()) raw = teacherSession.username.trim();
+    else if (user?.user_metadata?.full_name) raw = user.user_metadata.full_name;
+    else if (user?.email) raw = user.email.split("@")[0];
+    return extractCleanName(raw);
   }, [teacherSession, user]);
 
   const userDisplayBranch = useMemo(() => {

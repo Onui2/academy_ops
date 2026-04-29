@@ -53,6 +53,13 @@ type RequestDraft = {
   resubmitId?: string;
 };
 
+function extractCleanName(rawName: string) {
+  if (!rawName) return "직원";
+  let name = rawName.replace(/[\{\[\(\<].*?[\}\]\)\>]/g, "");
+  name = name.replace(/[^가-힣a-zA-Z]/g, "");
+  return name.slice(0, 3) || "직원";
+}
+
 const categories = [
   {
     id: "equipment" as const,
@@ -293,10 +300,11 @@ export function UserPortal() {
   const currentWorkflowGuide = categoryWorkflowGuide[draft.category];
   const profileName = useMemo(() => {
     const teacherName = teacherSession?.profile?.name;
-    if (typeof teacherName === "string" && teacherName.trim()) return teacherName.trim();
-    if (teacherSession?.username?.trim()) return teacherSession.username.trim();
-    if (supabaseUser?.email?.trim()) return supabaseUser.email.trim();
-    return "사용자";
+    let raw = "직원";
+    if (typeof teacherName === "string" && teacherName.trim()) raw = teacherName.trim();
+    else if (teacherSession?.username?.trim()) raw = teacherSession.username.trim();
+    else if (supabaseUser?.email?.trim()) raw = supabaseUser.email.trim();
+    return extractCleanName(raw);
   }, [teacherSession, supabaseUser]);
   const profileSubtitle = useMemo(() => {
     if (teacherSession?.branchName?.trim()) return teacherSession.branchName.trim();
@@ -661,7 +669,7 @@ export function UserPortal() {
           const updated: WorkItem = {
             ...existing,
             title: finalTitle,
-            requester: draft.academy,
+            requester: `${draft.academy} ${profileName}`.trim(),
             status: "접수", // Resubmitting resets to initial status
             priority,
             description,
@@ -700,7 +708,7 @@ export function UserPortal() {
         id: makeRequestId(),
         module: categoryToModule(draft.category, draft.requestItem),
         title: finalTitle,
-        requester: draft.academy,
+        requester: `${draft.academy} ${profileName}`.trim(),
         owner: "학원 관리자",
         status: "접수",
         priority,
