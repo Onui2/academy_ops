@@ -88,6 +88,7 @@ const categories = [
 ];
 
 const adminStorageKey = "academy-ops-hub-state-v2";
+const teacherSessionPollMs = 15000;
 
 function readAdminQueueFromStorage() {
   const raw = window.localStorage.getItem(adminStorageKey);
@@ -293,6 +294,26 @@ export function UserPortal() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  useEffect(() => {
+    if (!teacherSession || supabaseUser) return;
+
+    const syncHistory = () => {
+      if (document.visibilityState === "visible") {
+        void loadHistory();
+      }
+    };
+
+    const intervalId = window.setInterval(syncHistory, teacherSessionPollMs);
+    window.addEventListener("focus", syncHistory);
+    document.addEventListener("visibilitychange", syncHistory);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", syncHistory);
+      document.removeEventListener("visibilitychange", syncHistory);
+    };
+  }, [teacherSession, supabaseUser, loadHistory]);
 
   useEffect(() => {
     if (!supabase || !supabaseUser) return;

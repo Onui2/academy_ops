@@ -129,6 +129,7 @@ type FaqCategory = {
 
 const storageKey = "academy-ops-hub-state-v2";
 const webdavTargetsKey = "academy-ops-hub-webdav-targets-v1";
+const teacherSessionPollMs = 15000;
 
 const roles: { value: UserRole; label: string }[] = [
   { value: "general", label: "일반" },
@@ -560,6 +561,26 @@ export function OpsConsole() {
   useEffect(() => {
     if (!teacherSession || user) return;
     void loadTeacherRequests();
+  }, [teacherSession, user, loadTeacherRequests]);
+
+  useEffect(() => {
+    if (!teacherSession || user) return;
+
+    const syncTeacherRequests = () => {
+      if (document.visibilityState === "visible") {
+        void loadTeacherRequests();
+      }
+    };
+
+    const intervalId = window.setInterval(syncTeacherRequests, teacherSessionPollMs);
+    window.addEventListener("focus", syncTeacherRequests);
+    document.addEventListener("visibilitychange", syncTeacherRequests);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", syncTeacherRequests);
+      document.removeEventListener("visibilitychange", syncTeacherRequests);
+    };
   }, [teacherSession, user, loadTeacherRequests]);
 
   const selectedItem = items.find((item) => item.id === selectedId) ?? items[0];
