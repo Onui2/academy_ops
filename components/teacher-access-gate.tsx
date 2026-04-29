@@ -86,11 +86,11 @@ function writeStoredHint(hint: LoginHintState) {
 }
 
 function routeForRole(role: PortalRole) {
-  return role === "admin" ? "/" : "/user";
+  return role === "admin" ? "/ops" : "/user";
 }
 
 function routeForPortal(portal: PortalRole) {
-  return portal === "admin" ? "/" : "/user";
+  return portal === "admin" ? "/ops" : "/user";
 }
 
 function isPreferredPortal(role: PortalRole, portal: PortalRole) {

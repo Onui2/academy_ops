@@ -1,62 +1,40 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
+export function middleware(request: NextRequest) {
+  const sessionCookie = request.cookies.get("flipedu_teacher_session");
+  const hasSession = !!sessionCookie?.value;
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({
-            request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const isProtectedPath = request.nextUrl.pathname.startsWith("/user") || request.nextUrl.pathname.startsWith("/ops");
 
   // Protect /user and /ops routes
-  if (!user && (request.nextUrl.pathname.startsWith("/user") || request.nextUrl.pathname.startsWith("/ops"))) {
+  if (!hasSession && isProtectedPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // If user is logged in and accesses /login, redirect to /
-  if (user && request.nextUrl.pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+  // If user is logged in and accesses /login or /, redirect to their correct dashboard
+  if (hasSession && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/")) {
+    try {
+      // Basic base64 decode for edge runtime
+      const base64 = sessionCookie.value.replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = JSON.parse(atob(base64));
+      
+      const role = decoded.portalRole;
+      const url = request.nextUrl.clone();
+      url.pathname = role === "admin" ? "/ops" : "/user";
+      return NextResponse.redirect(url);
+    } catch {
+      // If parsing fails, proceed and let client-side components handle invalid sessions
+    }
   }
 
-  return supabaseResponse;
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
-     */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|api|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
+
