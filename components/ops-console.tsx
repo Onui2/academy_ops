@@ -165,6 +165,27 @@ const initialAudit: AuditEvent[] = [
   { id: "AUD-3", at: "11:20", actor: "NAS 관리자", event: "신규 직원 권한 요청 접수" }
 ];
 
+const requestIdPattern = /\bAOH-\d+\b/;
+
+function findAuditRequest(event: string, items: WorkItem[]) {
+  const requestId = event.match(requestIdPattern)?.[0];
+  if (!requestId) return null;
+  return items.find((item) => item.id === requestId) ?? null;
+}
+
+function formatAuditEventLabel(event: string, request?: WorkItem | null) {
+  if (!request) return event;
+  if (event.includes(`[${request.module}]`) || event.includes("유형:") || event.includes(`${request.id} ${request.module}`)) {
+    return event;
+  }
+
+  if (event.includes(request.id)) {
+    return event.replace(request.id, `${request.id} [${request.module}]`);
+  }
+
+  return `${event} · 유형: ${request.module}`;
+}
+
 const defaultForm: RequestForm = {
   module: "전산 장비",
   requestItem: "데스크톱 본체",
@@ -693,7 +714,7 @@ export function OpsConsole() {
     const nextItem = items.find((item) => item.id === id);
     const patched = nextItem ? { ...nextItem, ...patch } : null;
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
-    addAudit(userDisplayName, event);
+    addAudit(userDisplayName, formatAuditEventLabel(event, patched ?? nextItem), id);
     if (supabase && patched) {
       await updateRequestStatus(supabase, patched).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "상태 저장 실패");
@@ -796,9 +817,10 @@ export function OpsConsole() {
     addToast(`${item.id} 요청이 보류 처리되었습니다.`, "info");
   };
   const remove = (id: string) => {
+    const target = items.find((item) => item.id === id);
     setItems((current) => current.filter((item) => item.id !== id));
     setSelectedId(items.find((item) => item.id !== id)?.id ?? "");
-    addAudit("관리자", `${id} 삭제`);
+    addAudit("관리자", formatAuditEventLabel(`${id} 삭제`, target), id);
     if (supabase && user) {
       deleteDbRequest(supabase, id).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "삭제 실패");
@@ -2725,6 +2747,7 @@ function AuditLog({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLoca
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="px-4 py-3 text-left text-xs font-black text-slate-500">티켓 ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">유형</th>
                   <th className="px-4 py-3 text-left text-xs font-black text-slate-500">제목</th>
                   <th className="px-4 py-3 text-left text-xs font-black text-slate-500">요청자</th>
                   <th className="px-4 py-3 text-left text-xs font-black text-slate-500">승인자</th>
@@ -2736,6 +2759,9 @@ function AuditLog({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLoca
                 {approvedItems.map((item) => (
                   <tr key={item.id} className="bg-white hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.id}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">{item.module}</span>
+                    </td>
                     <td className="px-4 py-3 font-semibold text-slate-800 max-w-[200px] truncate">{item.title}</td>
                     <td className="px-4 py-3 text-slate-600">{item.requester}</td>
                     <td className="px-4 py-3 font-bold text-blue-700">{item.approvedBy}</td>
@@ -2760,7 +2786,10 @@ function AuditLog({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLoca
       <div>
         <h4 className="mb-3 text-sm font-bold text-slate-700">전체 로그</h4>
         <div className="grid gap-2">
-          {audit.map((item) => <div key={item.id} className="grid gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{item.event}</span></div>)}
+          {audit.map((item) => {
+            const request = findAuditRequest(item.event, items);
+            return <div key={item.id} className="grid gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{formatAuditEventLabel(item.event, request)}</span></div>;
+          })}
         </div>
       </div>
     </section>
