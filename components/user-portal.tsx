@@ -32,6 +32,7 @@ import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-dat
 import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
 import { useLivePartPrices } from "@/lib/use-live-part-prices";
 import type { BasketItem, EquipmentPart, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
+import type { User } from "@supabase/supabase-js";
 
 type Category = "equipment" | "as" | "software" | "network" | "nas" | "tablet" | "parts" | "other";
 
@@ -86,6 +87,19 @@ const categories = [
 ];
 
 const adminStorageKey = "academy-ops-hub-state-v2";
+
+function readAdminQueueFromStorage() {
+  const raw = window.localStorage.getItem(adminStorageKey);
+  if (!raw) return { items: [] as WorkItem[] };
+
+  try {
+    const parsed = JSON.parse(raw) as { items?: WorkItem[] };
+    return { items: parsed.items ?? [] };
+  } catch {
+    window.localStorage.removeItem(adminStorageKey);
+    return { items: [] as WorkItem[] };
+  }
+}
 
 const samples = [
   "3층 빔프로젝터 화면이 깜박여요",
@@ -142,6 +156,7 @@ export function UserPortal() {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [supabase] = useState(() => createClient());
+  const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
@@ -179,36 +194,55 @@ export function UserPortal() {
   }, []);
 
   const loadHistory = useCallback(async () => {
-    if (supabase) {
+    if (supabase && supabaseUser) {
       try {
         const rows = await fetchRequests(supabase);
-        setSubmitted(rows);
+        const localItems = readAdminQueueFromStorage().items;
+        const merged = [...rows, ...localItems.filter((item) => !rows.some((row) => row.id === item.id))];
+        setSubmitted(merged);
       } catch (_e) {
         console.error("Failed to load history from DB", _e);
+        setSubmitted(readAdminQueueFromStorage().items);
       }
     } else {
-      const raw = window.localStorage.getItem(adminStorageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { items?: WorkItem[] };
-        setSubmitted(parsed.items ?? []);
-      }
+      setSubmitted(readAdminQueueFromStorage().items);
     }
+  }, [supabase, supabaseUser]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let active = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      setSupabaseUser(data.user);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSupabaseUser(session?.user ?? null);
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const [dbFaqs, setDbFaqs] = useState<{ id: string; keyword: string; category: string; answer: string; escalation_required: boolean }[]>([]);
 
   useEffect(() => {
-    if (supabase) {
+    if (supabase && supabaseUser) {
       fetchFaqs(supabase).then(setDbFaqs).catch(console.error);
     }
-  }, [supabase]);
+  }, [supabase, supabaseUser]);
 
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !supabaseUser) return;
 
     const channel = supabase
       .channel("user_portal_changes")
@@ -224,7 +258,20 @@ export function UserPortal() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, loadHistory]);
+  }, [supabase, supabaseUser, loadHistory]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === adminStorageKey) {
+        void loadHistory();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [loadHistory]);
 
   useEffect(() => {
     if (draft.category === "as" && symptomQuery.length > 1) {
@@ -399,7 +446,7 @@ export function UserPortal() {
 
     const priority: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
 
-    const user = supabase ? (await supabase.auth.getUser()).data.user : null;
+    const user = supabaseUser;
 
     const basketDesc = partsBasket.map((p) => `- ${p.name}: ${p.price.toLocaleString()}원`).join("\n");
     const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
