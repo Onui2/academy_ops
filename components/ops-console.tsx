@@ -147,7 +147,7 @@ const roles: { value: UserRole; label: string }[] = [
   { value: "general", label: "일반" },
   { value: "academy_admin", label: "학원 운영" },
   { value: "executive", label: "경영진" },
-  { value: "super_admin", label: "최고 운영(Ops)" },
+  { value: "super_admin", label: "관리자" },
   { value: "nas_admin", label: "NAS 운영" }
 ];
 
