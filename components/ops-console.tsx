@@ -52,6 +52,7 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
+import type { TeacherSession } from "@/lib/teacher-session";
 import type { BasketItem, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
@@ -286,6 +287,7 @@ function isAdminRole(role: UserRole) {
 export function OpsConsole() {
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
+  const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
   const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
   const [role, setRole] = useState<UserRole>("super_admin");
@@ -491,6 +493,75 @@ export function OpsConsole() {
     };
   }, [supabase, loadDbRequests, user]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadTeacherSession = async () => {
+      try {
+        const response = await fetch("/api/teacher/session", {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (!active) return;
+
+        if (!response.ok) {
+          setTeacherSession(null);
+          return;
+        }
+
+        const data = (await response.json()) as { session?: TeacherSession };
+        setTeacherSession(data.session ?? null);
+      } catch {
+        if (!active) return;
+        setTeacherSession(null);
+      }
+    };
+
+    void loadTeacherSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const loadTeacherRequests = useCallback(async () => {
+    if (!teacherSession || user) return;
+
+    try {
+      setSyncState("Teacher 포털 요청 동기화 중");
+      const response = await fetch("/api/portal/requests", {
+        method: "GET",
+        cache: "no-store"
+      });
+
+      const data = (await response.json()) as { items?: WorkItem[]; message?: string };
+      if (!response.ok) {
+        throw new Error(data.message ?? "teacher 요청 목록을 불러오지 못했습니다.");
+      }
+
+      const remoteItems = Array.isArray(data.items) ? data.items : [];
+      const localState = readLocalOpsState();
+      const mergedItems = [...remoteItems, ...localState.items.filter((item) => !remoteItems.some((remote) => remote.id === item.id))];
+      setItems(mergedItems.length ? mergedItems : seedItems);
+      setAudit(localState.audit.length ? localState.audit : initialAudit);
+      setSelectedId(mergedItems[0]?.id ?? seedItems[0]?.id ?? "");
+      setRole(teacherSession.portalRole === "admin" ? "super_admin" : "general");
+      setSyncState("Teacher 세션 서버 동기화");
+    } catch (error) {
+      setSyncState(error instanceof Error ? error.message : "teacher 요청 동기화 실패");
+      const localState = readLocalOpsState();
+      setItems(localState.items.length ? localState.items : seedItems);
+      setAudit(localState.audit.length ? localState.audit : initialAudit);
+      setSelectedId(localState.items[0]?.id ?? seedItems[0]?.id ?? "");
+    }
+  }, [teacherSession, user]);
+
+  useEffect(() => {
+    if (!teacherSession || user) return;
+    void loadTeacherRequests();
+  }, [teacherSession, user, loadTeacherRequests]);
+
   const selectedItem = items.find((item) => item.id === selectedId) ?? items[0];
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -536,6 +607,21 @@ export function OpsConsole() {
       if (supabase && user) {
         await createDbRequest(supabase, user, next);
         await loadDbRequests(user);
+      } else if (teacherSession) {
+        const response = await fetch("/api/portal/requests", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ item: next })
+        });
+
+        const data = (await response.json()) as { message?: string };
+        if (!response.ok) {
+          throw new Error(data.message ?? "teacher 요청 생성에 실패했습니다.");
+        }
+
+        await loadTeacherRequests();
       } else {
         setItems((current) => [next, ...current]);
       }
@@ -558,6 +644,21 @@ export function OpsConsole() {
     if (supabase && patched) {
       await updateRequestStatus(supabase, patched).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "상태 저장 실패");
+      });
+    } else if (teacherSession && patched) {
+      await fetch(`/api/portal/requests/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ item: patched })
+      }).then(async (response) => {
+        const data = (await response.json()) as { message?: string };
+        if (!response.ok) {
+          throw new Error(data.message ?? "teacher 요청 상태 저장에 실패했습니다.");
+        }
+      }).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "teacher 상태 저장 실패");
       });
     }
   };
@@ -630,6 +731,19 @@ export function OpsConsole() {
     if (supabase && user) {
       deleteDbRequest(supabase, id).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "삭제 실패");
+        addToast("데이터 삭제에 실패했습니다.", "error");
+      });
+    } else if (teacherSession) {
+      fetch(`/api/portal/requests/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      }).then(async (response) => {
+        const data = (await response.json()) as { message?: string };
+        if (!response.ok) {
+          throw new Error(data.message ?? "teacher 요청 삭제에 실패했습니다.");
+        }
+        await loadTeacherRequests();
+      }).catch((error) => {
+        setSyncState(error instanceof Error ? error.message : "teacher 삭제 실패");
         addToast("데이터 삭제에 실패했습니다.", "error");
       });
     }
@@ -858,6 +972,10 @@ export function OpsConsole() {
       void loadDbRequests();
       return;
     }
+    if (teacherSession) {
+      void loadTeacherRequests();
+      return;
+    }
     setItems(seedItems);
     setAudit(initialAudit);
     setSelectedId(seedItems[0]?.id ?? "");
@@ -865,8 +983,11 @@ export function OpsConsole() {
   };
 
   const signOut = async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    await fetch("/api/teacher/session", { method: "DELETE" }).catch(() => undefined);
+    setTeacherSession(null);
     setUser(null);
     setSyncState("로그아웃됨");
   };

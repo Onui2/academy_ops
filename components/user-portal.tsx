@@ -31,6 +31,7 @@ import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
 import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-data";
 import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
 import { useLivePartPrices } from "@/lib/use-live-part-prices";
+import type { TeacherSession } from "@/lib/teacher-session";
 import type { BasketItem, EquipmentPart, EquipmentPreset, WorkItem, WorkPriority } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
@@ -157,6 +158,7 @@ export function UserPortal() {
   const [files, setFiles] = useState<File[]>([]);
   const [supabase] = useState(() => createClient());
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
+  const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
@@ -204,10 +206,30 @@ export function UserPortal() {
         console.error("Failed to load history from DB", _e);
         setSubmitted(readAdminQueueFromStorage().items);
       }
+    } else if (teacherSession) {
+      try {
+        const response = await fetch("/api/portal/requests", {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as { items?: WorkItem[]; message?: string };
+        if (!response.ok) {
+          throw new Error(data.message ?? "teacher 요청 목록을 불러오지 못했습니다.");
+        }
+
+        const remoteItems = Array.isArray(data.items) ? data.items : [];
+        const localItems = readAdminQueueFromStorage().items;
+        const merged = [...remoteItems, ...localItems.filter((item) => !remoteItems.some((row) => row.id === item.id))];
+        setSubmitted(merged);
+      } catch (error) {
+        console.error("Failed to load history from teacher API", error);
+        setSubmitted(readAdminQueueFromStorage().items);
+      }
     } else {
       setSubmitted(readAdminQueueFromStorage().items);
     }
-  }, [supabase, supabaseUser]);
+  }, [supabase, supabaseUser, teacherSession]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -228,6 +250,37 @@ export function UserPortal() {
       authListener.subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadTeacherSession = async () => {
+      try {
+        const response = await fetch("/api/teacher/session", {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (!active) return;
+        if (!response.ok) {
+          setTeacherSession(null);
+          return;
+        }
+
+        const data = (await response.json()) as { session?: TeacherSession };
+        setTeacherSession(data.session ?? null);
+      } catch {
+        if (!active) return;
+        setTeacherSession(null);
+      }
+    };
+
+    void loadTeacherSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [dbFaqs, setDbFaqs] = useState<{ id: string; keyword: string; category: string; answer: string; escalation_required: boolean }[]>([]);
 
@@ -479,6 +532,19 @@ export function UserPortal() {
 
           if (supabase && user) {
             await updateRequestStatus(supabase, updated);
+          } else if (teacherSession) {
+            const response = await fetch(`/api/portal/requests/${encodeURIComponent(updated.id)}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ item: updated })
+            });
+
+            const data = (await response.json()) as { message?: string };
+            if (!response.ok) {
+              throw new Error(data.message ?? "teacher 요청 재접수 저장에 실패했습니다.");
+            }
           } else {
             updateInAdminQueue(updated);
           }
@@ -521,6 +587,29 @@ export function UserPortal() {
               permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
               requested_by: user.id
             });
+          }
+        } else if (teacherSession) {
+          const response = await fetch("/api/portal/requests", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              item,
+              nasPermission:
+                draft.category === "nas"
+                  ? {
+                      user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "unknown@academy.local",
+                      resource_name: finalTitle,
+                      permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read"
+                    }
+                  : undefined
+            })
+          });
+
+          const data = (await response.json()) as { message?: string };
+          if (!response.ok) {
+            throw new Error(data.message ?? "teacher 요청 저장에 실패했습니다.");
           }
         } else {
           pushToAdminQueue(item);
