@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ClipboardList,
   CalendarDays,
+  Download,
   FilePlus2,
   Filter,
   FolderOpen,
@@ -184,6 +185,107 @@ function formatAuditEventLabel(event: string, request?: WorkItem | null) {
   }
 
   return `${event} · 유형: ${request.module}`;
+}
+
+function getVisibleSyncState(syncState: string) {
+  if (
+    syncState === "Teacher 세션 서버 동기화" ||
+    syncState === "Teacher 포털 요청 동기화 중" ||
+    syncState === "Teacher 세션 로컬 모드"
+  ) {
+    return "";
+  }
+
+  return syncState;
+}
+
+function escapeSpreadsheetValue(value: string | number) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildWorksheetXml(name: string, rows: Array<Array<string | number>>) {
+  const rowXml = rows
+    .map(
+      (row) =>
+        `<Row>${row
+          .map((cell) => `<Cell><Data ss:Type="${typeof cell === "number" ? "Number" : "String"}">${escapeSpreadsheetValue(cell)}</Data></Cell>`)
+          .join("")}</Row>`
+    )
+    .join("");
+
+  return `<Worksheet ss:Name="${escapeSpreadsheetValue(name)}"><Table>${rowXml}</Table></Worksheet>`;
+}
+
+function downloadAuditWorkbook(audit: AuditEvent[], items: WorkItem[]) {
+  const approvedItems = items.filter((item) => item.approvedBy && item.approvedAt);
+  const auditRows: Array<Array<string | number>> = [
+    ["시간", "작업자", "티켓 ID", "유형", "제목", "요청자", "상태", "우선순위", "담당", "이벤트"]
+  ];
+
+  audit.forEach((entry) => {
+    const request = findAuditRequest(entry.event, items);
+    auditRows.push([
+      entry.at,
+      entry.actor,
+      request?.id ?? "",
+      request?.module ?? "",
+      request?.title ?? "",
+      request?.requester ?? "",
+      request?.status ?? "",
+      request?.priority ?? "",
+      request?.owner ?? "",
+      formatAuditEventLabel(entry.event, request)
+    ]);
+  });
+
+  const approvalRows: Array<Array<string | number>> = [
+    ["티켓 ID", "유형", "제목", "요청자", "승인자", "승인시간", "상태", "담당", "우선순위", "금액", "공급사", "비고"]
+  ];
+
+  approvedItems.forEach((item) => {
+    approvalRows.push([
+      item.id,
+      item.module,
+      item.title,
+      item.requester,
+      item.approvedBy ?? "",
+      item.approvedAt ?? "",
+      item.status,
+      item.owner,
+      item.priority,
+      item.amount ?? "",
+      item.vendor ?? "",
+      item.audit ?? ""
+    ]);
+  });
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+${buildWorksheetXml("감사로그", auditRows)}
+${buildWorksheetXml("승인이력", approvalRows)}
+</Workbook>`;
+
+  const blob = new Blob([workbookXml], {
+    type: "application/vnd.ms-excel;charset=utf-8;"
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const dateLabel = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `audit-log-${dateLabel}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 const defaultForm: RequestForm = {
@@ -642,6 +744,7 @@ export function OpsConsole() {
   const pendingCount = items.filter((item) => item.status !== "완료").length;
   const approvalCount = items.filter((item) => item.status === "승인 대기").length;
   const riskCount = items.filter((item) => item.priority === "긴급" || item.status === "보류").length;
+  const visibleSyncState = getVisibleSyncState(syncState);
   const visibleMenuItems = menuItems.filter(
     (item) => item.key !== "equipment" && item.key !== "parts" && (item.key !== "audit" || isAdminRole(role))
   );
@@ -1100,9 +1203,11 @@ export function OpsConsole() {
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 학원, 담당 검색" />
           </div>
           <div className="ml-auto flex items-center gap-4 md:ml-0">
-            <span className="hidden rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 lg:inline-flex">
-              {syncState}
-            </span>
+            {visibleSyncState ? (
+              <span className="hidden rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 lg:inline-flex">
+                {visibleSyncState}
+              </span>
+            ) : null}
             <span className="hidden rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-bold sm:inline-flex md:px-3 md:py-2 md:text-sm">
               {roles.find((item) => item.value === role)?.label ?? "운영(Ops)"}
             </span>
@@ -2735,7 +2840,16 @@ function AuditLog({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLoca
     <section className="surface-strong rounded-lg p-5 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-bold">감사 로그</h3>
-        <button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold hover:bg-gray-50">초기화</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadAuditWorkbook(audit, items)}
+            className="focus-ring inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            엑셀 다운로드
+          </button>
+          <button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold hover:bg-gray-50">초기화</button>
+        </div>
       </div>
 
       {/* Approval history table */}
