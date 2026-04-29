@@ -13,7 +13,6 @@ import {
   Download,
   FilePlus2,
   Filter,
-  FolderOpen,
   HardDrive,
   Home,
   LogOut,
@@ -399,6 +398,27 @@ function buildWebDavUrl(target: WebDavTargetInput) {
   const cleanPath = target.path.startsWith("/") ? target.path : `/${target.path}`;
   const port = target.port ? `:${target.port}` : "";
   return `${target.protocol}://${cleanHost}${port}${cleanPath}`;
+}
+
+function buildDsmUrl(target: WebDavTargetInput) {
+  const source = target.url?.trim() || buildWebDavUrl(target);
+
+  try {
+    const parsed = new URL(source);
+    parsed.pathname = "/";
+    parsed.search = "";
+    parsed.hash = "";
+
+    if (parsed.port === "5006") parsed.port = "5001";
+    if (parsed.port === "5005") parsed.port = "5000";
+    if (!parsed.port) parsed.port = parsed.protocol === "https:" ? "5001" : "5000";
+
+    return parsed.toString();
+  } catch {
+    const cleanHost = target.host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const port = target.protocol === "https" ? "5001" : "5000";
+    return `${target.protocol}://${cleanHost}:${port}/`;
+  }
 }
 
 function normalizeWebDavTarget(target: Partial<WebDavTargetInput>): WebDavTargetInput {
@@ -2086,10 +2106,11 @@ function NasScreen({
                         </div>
                       )}
 
-                      <div className="mt-4 flex gap-2">
-                        <button onClick={() => startEditWebDavTarget(target)} className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50">설정 수정</button>
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                        <button onClick={() => window.open(buildDsmUrl(target), "_blank", "noopener,noreferrer")} className="rounded-xl border border-blue-200 bg-blue-50 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-100">DSM 바로가기</button>
+                        <button onClick={() => startEditWebDavTarget(target)} className="rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50">설정 수정</button>
                         {isOnline ? (
-                            <button onClick={() => disconnectWebDav(target.id)} className="flex-1 rounded-xl bg-rose-50 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-100">연결 끊기</button>
+                            <button onClick={() => disconnectWebDav(target.id)} className="rounded-xl bg-rose-50 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-100">연결 끊기</button>
                         ) : (
                             <button onClick={() => removeWebDavTarget(target.id)} className="rounded-xl border border-rose-100 bg-white px-3 py-2 text-[11px] font-bold text-rose-400 hover:bg-rose-50">삭제</button>
                         )}
@@ -2098,28 +2119,6 @@ function NasScreen({
                   );
                 })}
               </div>
-
-              {(webdav?.items ?? []).length > 0 && (
-                <div className="mt-6">
-                    <h4 className="text-sm font-bold text-slate-800 mb-3">최근 파일 시스템 노출</h4>
-                    <div className="grid gap-2">
-                        {webdav!.items.slice(0, 5).map((item) => (
-                            <div key={`${item.path}-${item.name}`} className="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm hover:translate-x-1 transition">
-                                <div className="flex min-w-0 items-center gap-3">
-                                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${item.type === "folder" ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-500"}`}>
-                                        <FolderOpen className="h-4 w-4" aria-hidden="true" />
-                                    </div>
-                                    <div>
-                                        <p className="truncate font-bold text-slate-800">{item.name}</p>
-                                        <p className="text-[10px] text-slate-400">{item.targetName || "Storage Source"}</p>
-                                    </div>
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-400">{item.size ? `${Math.round(item.size / 1024)}KB` : "DIR"}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-              )}
             </section>
           </div>
 

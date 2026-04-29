@@ -700,6 +700,22 @@ export function UserPortal() {
     }
     return days;
   }, [calendarYear, calendarMonth]);
+  const requestedDateWarning = useMemo(() => {
+    const selectedDate = draft.requestedDate ?? defaultRequestedDate;
+    if (!selectedDate) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(selectedDate);
+    target.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 7) {
+      return "희망 완료일이 7일 이내라 부품 수급이나 일정 상황에 따라 처리일이 조정될 수 있습니다.";
+    }
+
+    return null;
+  }, [defaultRequestedDate, draft.requestedDate]);
 
   const loadForResubmit = (item: WorkItem) => {
     const categoryMap: Record<string, Category> = {
@@ -1447,6 +1463,96 @@ export function UserPortal() {
                     </select>
                   </div>
 
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">희망 완료일</p>
+                    <p className="mt-1 text-sm text-slate-500">주말과 공휴일은 제외하고 요청 일정을 선택합니다.</p>
+                    <div className="relative mt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!calendarOpen) {
+                            const sel = draft.requestedDate ?? defaultRequestedDate;
+                            const d = new Date(sel);
+                            setCalendarYear(d.getFullYear());
+                            setCalendarMonth(d.getMonth());
+                            if (!draft.requestedDate) setDraft({ ...draft, requestedDate: sel });
+                          }
+                          setCalendarOpen((prev) => !prev);
+                        }}
+                        className="inline-flex h-11 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <span>희망 완료일: <span className="text-blue-700">{draft.requestedDate ?? defaultRequestedDate}</span></span>
+                        <ChevronDown className="h-4 w-4 text-slate-400" />
+                      </button>
+                      {requestedDateWarning ? (
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                          {requestedDateWarning}
+                        </div>
+                      ) : null}
+                      {calendarOpen ? (
+                        <div className="absolute left-0 top-14 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+                          <div className="mb-3 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(y => y - 1); }
+                                else setCalendarMonth(m => m - 1);
+                              }}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
+                            ><ChevronLeft className="h-4 w-4" /></button>
+                            <span className="text-sm font-black text-slate-800">{calendarYear}년 {calendarMonth + 1}월</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(y => y + 1); }
+                                else setCalendarMonth(m => m + 1);
+                              }}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
+                            ><ChevronRight className="h-4 w-4" /></button>
+                          </div>
+                          <div className="mb-1 grid grid-cols-7 text-center">
+                            {["일","월","화","수","목","금","토"].map(d => (
+                              <span key={d} className={`text-[10px] font-black pb-1 ${d === "일" ? "text-rose-500" : d === "토" ? "text-blue-500" : "text-slate-400"}`}>{d}</span>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-7 gap-0.5">
+                            {calendarDays.map((ds, i) => {
+                              if (!ds) return <span key={`empty-${i}`} />;
+                              const disabled = isDateDisabled(ds);
+                              const selected = (draft.requestedDate ?? defaultRequestedDate) === ds;
+                              const dow = new Date(ds).getDay();
+                              const isHoliday = holidays.has(ds);
+                              return (
+                                <button
+                                  key={ds}
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => { setDraft({ ...draft, requestedDate: ds }); setCalendarOpen(false); }}
+                                  className={`h-8 w-full rounded-lg text-xs font-bold transition-all ${
+                                    selected
+                                      ? "bg-blue-600 text-white shadow"
+                                      : disabled
+                                        ? "cursor-not-allowed text-slate-200"
+                                        : isHoliday
+                                          ? "text-rose-400 hover:bg-rose-50"
+                                          : dow === 0
+                                            ? "text-rose-500 hover:bg-rose-50"
+                                            : dow === 6
+                                              ? "text-blue-500 hover:bg-blue-50"
+                                              : "text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {Number(ds.slice(8))}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="mt-2 text-[10px] text-slate-400">• 과거, 금일, 주말, 공휴일은 선택불가</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
                   {draft.category === "equipment" ? (
                     <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
                       <input
@@ -1692,11 +1798,11 @@ export function UserPortal() {
                       <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
                         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                           <div className="relative min-w-[220px] flex-1">
-                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                           <input
                             value={partQuery}
                             onChange={(event) => setPartQuery(event.target.value)}
-                            className="field h-10 pl-10 text-xs"
+                            className="field h-11 pl-12 pr-4 text-sm"
                             placeholder="모델명, 제조사, 부품명 검색"
                           />
                           </div>
@@ -1841,87 +1947,6 @@ export function UserPortal() {
                   {files.length}개 파일 선택됨: {files.map((file) => file.name).join(", ")}
                 </div>
               ) : null}
-              {/* Date picker */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!calendarOpen) {
-                      const sel = draft.requestedDate ?? defaultRequestedDate;
-                      const d = new Date(sel);
-                      setCalendarYear(d.getFullYear());
-                      setCalendarMonth(d.getMonth());
-                      if (!draft.requestedDate) setDraft({ ...draft, requestedDate: sel });
-                    }
-                    setCalendarOpen((prev) => !prev);
-                  }}
-                  className="inline-flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <span>흭망 완료일: <span className="text-blue-700">{draft.requestedDate ?? defaultRequestedDate}</span></span>
-                  <ChevronDown className="h-4 w-4 text-slate-400" />
-                </button>
-                {calendarOpen ? (
-                  <div className="absolute left-0 top-12 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
-                    <div className="mb-3 flex items-center justify-between">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(y => y - 1); }
-                          else setCalendarMonth(m => m - 1);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
-                      ><ChevronLeft className="h-4 w-4" /></button>
-                      <span className="text-sm font-black text-slate-800">{calendarYear}년 {calendarMonth + 1}월</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(y => y + 1); }
-                          else setCalendarMonth(m => m + 1);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
-                      ><ChevronRight className="h-4 w-4" /></button>
-                    </div>
-                    <div className="mb-1 grid grid-cols-7 text-center">
-                      {["일","월","화","수","목","금","토"].map(d => (
-                        <span key={d} className={`text-[10px] font-black pb-1 ${d === "일" ? "text-rose-500" : d === "토" ? "text-blue-500" : "text-slate-400"}`}>{d}</span>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-7 gap-0.5">
-                      {calendarDays.map((ds, i) => {
-                        if (!ds) return <span key={`empty-${i}`} />;
-                        const disabled = isDateDisabled(ds);
-                        const selected = (draft.requestedDate ?? defaultRequestedDate) === ds;
-                        const dow = new Date(ds).getDay();
-                        const isHoliday = holidays.has(ds);
-                        return (
-                          <button
-                            key={ds}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => { setDraft({ ...draft, requestedDate: ds }); setCalendarOpen(false); }}
-                            className={`h-8 w-full rounded-lg text-xs font-bold transition-all ${
-                              selected
-                                ? "bg-blue-600 text-white shadow"
-                                : disabled
-                                  ? "cursor-not-allowed text-slate-200"
-                                  : isHoliday
-                                    ? "text-rose-400 hover:bg-rose-50"
-                                    : dow === 0
-                                      ? "text-rose-500 hover:bg-rose-50"
-                                      : dow === 6
-                                        ? "text-blue-500 hover:bg-blue-50"
-                                        : "text-slate-700 hover:bg-slate-100"
-                            }`}
-                          >
-                            {Number(ds.slice(8))}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-2 text-[10px] text-slate-400">• 과거, 금일, 주말, 공휴일은 선택불가</p>
-                  </div>
-                ) : null}
-              </div>
               {draft.urgency === "긴급" ? (
                 <div className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
                   <div>
