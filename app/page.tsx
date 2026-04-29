@@ -1,5 +1,5 @@
-import { OpsConsole } from "@/components/ops-console";
+import { AdminPortalEntry } from "@/components/admin-portal-entry";
 
 export default function Home() {
-  return <OpsConsole />;
+  return <AdminPortalEntry />;
 }

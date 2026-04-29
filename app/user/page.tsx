@@ -1,5 +1,5 @@
-import { UserPortal } from "@/components/user-portal";
+import { UserPortalEntry } from "@/components/user-portal-entry";
 
 export default function UserPage() {
-  return <UserPortal />;
+  return <UserPortalEntry />;
 }
