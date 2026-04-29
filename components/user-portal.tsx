@@ -57,7 +57,7 @@ function extractCleanName(rawName: string) {
   if (!rawName) return "직원";
   let name = rawName.replace(/[\{\[\(\<].*?[\}\]\)\>]/g, "");
   name = name.replace(/[^가-힣a-zA-Z]/g, "");
-  return name.slice(0, 3) || "직원";
+  return name || "직원";
 }
 
 const categories = [

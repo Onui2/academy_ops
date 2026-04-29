@@ -132,7 +132,7 @@ function extractCleanName(rawName: string) {
   if (!rawName) return "운영자";
   let name = rawName.replace(/[\{\[\(\<].*?[\}\]\)\>]/g, "");
   name = name.replace(/[^가-힣a-zA-Z]/g, "");
-  return name.slice(0, 3) || "운영자";
+  return name || "운영자";
 }
 
 const storageKey = "academy-ops-hub-state-v2";
