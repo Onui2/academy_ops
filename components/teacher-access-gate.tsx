@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Building2, ChevronRight, Loader2, LogIn, LogOut, MapPinned, UserRound } from "lucide-react";
+import { Building2, ChevronRight, Loader2, LogIn, MapPinned, UserRound } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -89,12 +89,12 @@ function routeForRole(role: PortalRole) {
   return role === "admin" ? "/" : "/user";
 }
 
-function canAccessPortal(role: PortalRole, portal: PortalRole) {
-  if (portal === "user") {
-    return true;
-  }
+function routeForPortal(portal: PortalRole) {
+  return portal === "admin" ? "/" : "/user";
+}
 
-  return role === "admin";
+function isPreferredPortal(role: PortalRole, portal: PortalRole) {
+  return routeForRole(role) === routeForPortal(portal);
 }
 
 export function TeacherAccessGate({
@@ -323,8 +323,8 @@ export function TeacherAccessGate({
       setForm((current) => ({ ...current, password: "" }));
       setSession(data.session);
 
-      if (!canAccessPortal(data.session.portalRole, portal)) {
-        const destination = routeForRole(data.session.portalRole);
+      const destination = routeForRole(data.session.portalRole);
+      if (destination !== pathname) {
         setIsRedirecting(true);
         router.replace(destination);
         return;
@@ -335,20 +335,6 @@ export function TeacherAccessGate({
       setMessage("teacher 로그인 중 네트워크 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
-    }
-  }
-
-  async function signOut() {
-    setIsSubmitting(true);
-    try {
-      await fetch("/api/teacher/session", {
-        method: "DELETE"
-      });
-    } finally {
-      setSession(null);
-      setIsSubmitting(false);
-      setIsRedirecting(false);
-      setMessage(selectedAcademy ? "지점을 확인하고 teacher 계정으로 로그인해 주세요." : "학원명을 먼저 입력해 주세요.");
     }
   }
 
@@ -414,7 +400,7 @@ export function TeacherAccessGate({
       return;
     }
 
-    if (canAccessPortal(session.portalRole, portal)) {
+    if (isPreferredPortal(session.portalRole, portal)) {
       return;
     }
 
@@ -618,22 +604,5 @@ export function TeacherAccessGate({
     );
   }
 
-  return (
-    <>
-      {children}
-      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
-        <div className="rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-black text-slate-700 shadow-lg backdrop-blur">
-          {session.username} · {session.branchName ?? session.branch}
-        </div>
-        <button
-          onClick={() => void signOut()}
-          disabled={isSubmitting}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-bold text-white shadow-lg transition hover:bg-slate-800 disabled:opacity-60"
-        >
-          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-          로그아웃
-        </button>
-      </div>
-    </>
-  );
+  return <>{children}</>;
 }

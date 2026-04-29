@@ -27,6 +27,7 @@ import {
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { 
   aiHarnessSteps, 
@@ -286,6 +287,7 @@ function isAdminRole(role: UserRole) {
 }
 
 export function OpsConsole() {
+  const router = useRouter();
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
   const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
@@ -1011,6 +1013,8 @@ export function OpsConsole() {
     setTeacherSession(null);
     setUser(null);
     setSyncState("로그아웃됨");
+    router.replace("/");
+    router.refresh();
   };
 
   return (
@@ -1285,7 +1289,7 @@ function QueueScreen(props: {
 
   return (
     <Screen title="요청 큐" desc="모든 요청의 진행 상태와 승인 액션을 관리합니다.">
-      <QueueTable {...props} openDetail={openDetail} />
+      <QueueTable {...props} openDetail={openDetail} openCreate={() => setCreateOpen(true)} />
       {createOpen ? (
         <Modal title="요청 접수" onClose={() => setCreateOpen(false)}>
           <RequestComposer
@@ -1352,6 +1356,7 @@ function QueueTable(props: {
   reject: (item: WorkItem) => void;
   remove: (id: string) => void;
   openDetail: (id: string) => void;
+  openCreate: () => void;
 }) {
   return (
     <section className="surface-strong min-w-0 overflow-hidden rounded-lg">
@@ -1364,9 +1369,7 @@ function QueueTable(props: {
               {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </div>
-          <div className="hidden">
-            접수
-          </div>
+          <ActionButton onClick={props.openCreate} label="요청 접수" />
         </div>
       </div>
       <div className="hidden md:block overflow-x-auto">

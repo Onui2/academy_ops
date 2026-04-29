@@ -4,6 +4,15 @@ import { createServiceSupabaseClient } from "@/lib/server-supabase";
 import { readTeacherSessionFromCookieHeader } from "@/lib/teacher-session";
 import type { WorkItem } from "@/types/ops";
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 export async function GET(request: Request) {
   const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
   if (!session) {
@@ -20,7 +29,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ items });
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "요청 목록을 불러오지 못했습니다." },
+      { message: getErrorMessage(error, "요청 목록을 불러오지 못했습니다.") },
       { status: 500 }
     );
   }
@@ -63,7 +72,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "요청 저장에 실패했습니다." },
+      { message: getErrorMessage(error, "요청 저장에 실패했습니다.") },
       { status: 500 }
     );
   }

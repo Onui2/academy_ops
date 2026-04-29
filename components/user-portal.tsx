@@ -4,10 +4,12 @@ import {
   ArrowRight,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   HardDrive,
   HelpCircle,
   Laptop,
+  LogOut,
   Megaphone,
   MemoryStick,
   Cpu,
@@ -21,10 +23,11 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  UserRound,
   Wrench,
   X
 } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
@@ -214,6 +217,7 @@ const categoryWorkflowGuide: Record<
 };
 
 export function UserPortal() {
+  const router = useRouter();
   const [activeSection, setActiveSection] = useState<"request-start" | "request-status" | "request-workflow" | "request-help">("request-start");
   const [draft, setDraft] = useState<RequestDraft>({
     category: "other",
@@ -231,6 +235,7 @@ export function UserPortal() {
   const [supabase] = useState(() => createClient());
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
@@ -286,6 +291,18 @@ export function UserPortal() {
     [submittedQueue]
   );
   const currentWorkflowGuide = categoryWorkflowGuide[draft.category];
+  const profileName = useMemo(() => {
+    const teacherName = teacherSession?.profile?.name;
+    if (typeof teacherName === "string" && teacherName.trim()) return teacherName.trim();
+    if (teacherSession?.username?.trim()) return teacherSession.username.trim();
+    if (supabaseUser?.email?.trim()) return supabaseUser.email.trim();
+    return "사용자";
+  }, [teacherSession, supabaseUser]);
+  const profileSubtitle = useMemo(() => {
+    if (teacherSession?.branchName?.trim()) return teacherSession.branchName.trim();
+    if (teacherSession?.brandName?.trim()) return teacherSession.brandName.trim();
+    return "Teacher Portal";
+  }, [teacherSession]);
 
   const pushToast = useCallback((message: string, type: ToastItem["type"] = "info") => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -760,10 +777,28 @@ export function UserPortal() {
   const changeSection = useCallback(
     (sectionId: "request-start" | "request-status" | "request-workflow" | "request-help") => {
       setActiveSection(sectionId);
+      setIsProfileOpen(false);
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
     []
   );
+
+  const handleProfileSignOut = useCallback(async () => {
+    setIsProfileOpen(false);
+
+    if (supabase) {
+      await supabase.auth.signOut().catch(() => undefined);
+    }
+
+    await fetch("/api/teacher/session", {
+      method: "DELETE"
+    }).catch(() => undefined);
+
+    setTeacherSession(null);
+    setSupabaseUser(null);
+    router.replace("/");
+    router.refresh();
+  }, [router, supabase]);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -776,9 +811,51 @@ export function UserPortal() {
             <h1 className="text-xl font-bold text-slate-900">경영지원 운영 허브</h1>
             <p className="text-sm text-slate-500">경영지원 통합 운영 시스템</p>
           </div>
-          <Link href="/" className="ml-auto rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50">
-            관리자
-          </Link>
+          <div className="relative ml-auto">
+            <button
+              type="button"
+              onClick={() => setIsProfileOpen((current) => !current)}
+              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:bg-slate-50"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                <UserRound className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div className="hidden min-w-0 sm:block">
+                <p className="truncate text-sm font-black text-slate-900">{profileName}</p>
+                <p className="truncate text-xs text-slate-500">{profileSubtitle}</p>
+              </div>
+              <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isProfileOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+            </button>
+
+            {isProfileOpen ? (
+              <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                <div className="rounded-xl bg-slate-50 px-4 py-3">
+                  <p className="text-sm font-black text-slate-900">{profileName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{profileSubtitle}</p>
+                  {teacherSession?.portalRole === "admin" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        router.push("/");
+                      }}
+                      className="mt-3 inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    >
+                      관리자 화면으로
+                    </button>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleProfileSignOut()}
+                  className="mt-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                  로그아웃
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -1252,16 +1329,16 @@ export function UserPortal() {
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${isPartPriceLoading ? "animate-spin" : ""}`} />
-                            {isPartPriceLoading ? "媛寃?議고쉶 以?.." : "媛寃?깉濡좊Ц"}
+                            {isPartPriceLoading ? "가격 조회 중..." : "가격 새로고침"}
                           </button>
                         </div>
                         <p className="mb-4 text-[11px] font-medium text-slate-500">
                           {lastCheckedAt
-                            ? `?ㅼ떆媛?媛寃?湲곗? ${new Date(lastCheckedAt).toLocaleTimeString("ko-KR", {
+                            ? `마지막 가격 확인 ${new Date(lastCheckedAt).toLocaleTimeString("ko-KR", {
                                 hour: "2-digit",
                                 minute: "2-digit"
-                              })} 쨌 ?ㅻ굹? 湲곗??吏留덉폆 ??곗닔留??곌껐 諛붾줈媛湲곕? ?쒓났?⑸땲??`
-                            : "?ㅻ굹? ?ㅼ떆媛?媛寃⑥쓣 遺덈윭?ㅺ퀬 ?덉뒿?덈떎."}
+                              })} 기준가이며, 담은 품목은 요청서에 함께 전달됩니다.`
+                            : "가격 정보를 불러오면 최신 기준가를 함께 검토할 수 있습니다."}
                         </p>
 
                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

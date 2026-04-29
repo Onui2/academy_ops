@@ -37,6 +37,11 @@ type PortalRequestMeta = {
   portalRole: TeacherSession["portalRole"];
 };
 
+type SupabaseLikeError = {
+  code?: string;
+  message?: string;
+};
+
 const PORTAL_META_PREFIX = "[[TEACHER_PORTAL_META]]";
 const PORTAL_SYSTEM_EMAIL = process.env.TEACHER_PORTAL_SYSTEM_EMAIL ?? "teacher-portal@academy.local";
 const PORTAL_SYSTEM_PASSWORD =
@@ -73,6 +78,12 @@ const priorityFromDb: Record<DbPriority, WorkPriority> = {
   high: "높음",
   urgent: "긴급"
 };
+
+function isMissingRelationError(error: SupabaseLikeError | null | undefined, relation: string) {
+  if (!error) return false;
+  const message = error.message?.toLowerCase() ?? "";
+  return error.code === "PGRST205" || error.code === "42P01" || (message.includes("not found") && message.includes(relation));
+}
 
 function buildApprovalFlow(item: WorkItem): Array<{ step_order: number; approver_role: UserRole }> {
   if (item.module === "NAS") {
@@ -177,7 +188,6 @@ export async function ensureTeacherPortalRequester(supabase: SupabaseClient) {
       email: portalUser.email ?? PORTAL_SYSTEM_EMAIL,
       full_name: "Teacher Portal",
       role: "general",
-      campus: "Teacher Portal",
       mfa_enabled: false
     },
     { onConflict: "id" }
@@ -287,7 +297,7 @@ export async function createPortalRequest(
       }))
     );
 
-    if (approvalError) throw approvalError;
+    if (approvalError && !isMissingRelationError(approvalError, "approvals")) throw approvalError;
   }
 
   if (extra?.nasPermission) {

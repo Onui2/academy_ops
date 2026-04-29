@@ -104,9 +104,7 @@ export const aiHarnessSteps = [
 
 export const equipmentParts: EquipmentPart[] = [
   // CPU
-  { id: "cpu-amd-1", category: "CPU", name: "AMD Ryzen 5 5600G", price: 165000, description: "내장그래픽 포함 업무용", performanceNote: "외장 그래픽 없이도 문서 작업, 웹 업무, 영상 재생을 안정적으로 처리합니다.", tier: "기본" },
   { id: "cpu-2", category: "CPU", name: "AMD Ryzen 5 5600G", price: 165000, description: "표준 업무용", performanceNote: "내장 그래픽 포함이라 일반 학원 업무용 PC를 합리적으로 구성하기 좋습니다.", tier: "업무용" },
-  { id: "cpu-amd-2g", category: "CPU", name: "AMD Ryzen 7 5700G", price: 245000, description: "상위 내장그래픽 포함 업무용", performanceNote: "강의실 PC나 데스크 업무에서 외장 그래픽 없이도 여유 있는 성능을 제공합니다.", tier: "업무용" },
   { id: "cpu-3", category: "CPU", name: "AMD Ryzen 7 5700G", price: 245000, description: "고성능 업무용", performanceNote: "AM4 기반에서도 여유 있는 멀티태스킹과 내장 그래픽 성능을 제공합니다.", tier: "고성능" },
   
   // RAM
@@ -204,4 +202,3 @@ export const equipmentPresets: EquipmentPreset[] = [
     }
   }
 ];
-
