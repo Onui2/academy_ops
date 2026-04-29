@@ -594,6 +594,20 @@ export function OpsConsole() {
     });
   }, [items, query, status]);
 
+  const userDisplayName = useMemo(() => {
+    const teacherName = teacherSession?.profile?.name;
+    if (typeof teacherName === "string" && teacherName.trim()) return teacherName.trim();
+    if (teacherSession?.username?.trim()) return teacherSession.username.trim();
+    if (user?.user_metadata?.full_name) return user.user_metadata.full_name;
+    return user?.email?.split("@")[0] ?? "운영자";
+  }, [teacherSession, user]);
+
+  const userDisplayBranch = useMemo(() => {
+    if (teacherSession?.branchName?.trim()) return teacherSession.branchName.trim();
+    if (teacherSession?.brandName?.trim()) return teacherSession.brandName.trim();
+    return "경영지원본부";
+  }, [teacherSession]);
+
   const diagnosis = diagnose(symptom);
   const pendingCount = items.filter((item) => item.status !== "완료").length;
   const approvalCount = items.filter((item) => item.status === "승인 대기").length;
@@ -1029,13 +1043,24 @@ export function OpsConsole() {
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="제목, 학원, 담당 검색" />
           </div>
-          <div className="ml-auto flex items-center gap-2 md:ml-0">
+          <div className="ml-auto flex items-center gap-4 md:ml-0">
             <span className="hidden rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 lg:inline-flex">
               {syncState}
             </span>
             <span className="hidden rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-bold sm:inline-flex md:px-3 md:py-2 md:text-sm">
-              {roles.find((item) => item.value === role)?.label ?? "관리자"}
+              {roles.find((item) => item.value === role)?.label ?? "운영(Ops)"}
             </span>
+            
+            <div className="hidden items-center gap-3 md:flex">
+              <div className="text-right">
+                <p className="text-sm font-bold text-slate-900">{userDisplayName}</p>
+                <p className="text-xs font-medium text-slate-500">{userDisplayBranch}</p>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-blue-200 bg-blue-100 shadow-sm">
+                <span className="text-sm font-bold text-blue-700">{userDisplayName.charAt(0)}</span>
+              </div>
+            </div>
+
             <button onClick={signOut} className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700 sm:h-10 sm:w-10" aria-label="로그아웃">
               <LogOut className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
             </button>
