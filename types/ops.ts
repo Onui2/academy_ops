@@ -38,6 +38,9 @@ export type WorkItem = {
   urgentReason?: string;
   urgentImpact?: string;
   evidenceFiles?: string[];
+  approvedBy?: string;
+  approvedAt?: string;
+  requestedDate?: string;
 };
 
 export type ModuleSummary = {

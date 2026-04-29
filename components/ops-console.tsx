@@ -753,7 +753,18 @@ export function OpsConsole() {
       return;
     }
 
-    await updateItem(item.id, { status: nextStatus(item.status), audit: `${role} 승인 처리`, approvalStep: (item.approvalStep ?? 0) + 1, approvalNote: item.approvalNote }, `${item.id} 승인 진행`);
+    await updateItem(
+      item.id,
+      {
+        status: nextStatus(item.status),
+        audit: `${role} 승인 처리`,
+        approvalStep: (item.approvalStep ?? 0) + 1,
+        approvalNote: item.approvalNote,
+        approvedBy: userDisplayName,
+        approvedAt: new Date().toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      },
+      `${item.id} 승인 진행`
+    );
     if (supabase && user) {
       await decideApprovalStep(supabase, item.id, role, "approved", item.approvalNote).catch((error) => {
         setSyncState(error instanceof Error ? error.message : "승인 단계 기록 실패");
@@ -1163,7 +1174,7 @@ export function OpsConsole() {
                 setEditingTargetId={setEditingTargetId}
               />
             ) : null}
-            {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} /> : null}
+            {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} items={items} /> : null}
           </>
         </div>
       </div>
@@ -1983,11 +1994,11 @@ function NasScreen({
   );
 }
 
-function AuditScreen({ audit, resetLocal }: { audit: AuditEvent[]; resetLocal: () => void }) {
+function AuditScreen({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLocal: () => void; items: import("@/types/ops").WorkItem[] }) {
   return (
     <Screen title="감사/AI" desc="AI Harness 단계와 운영 감사 로그를 확인합니다.">
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <AuditLog audit={audit} resetLocal={resetLocal} />
+        <AuditLog audit={audit} resetLocal={resetLocal} items={items} />
         <AiHarness />
       </section>
     </Screen>
@@ -2682,12 +2693,61 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>;
 }
 
-function AuditLog({ audit, resetLocal }: { audit: AuditEvent[]; resetLocal: () => void }) {
+function AuditLog({ audit, resetLocal, items }: { audit: AuditEvent[]; resetLocal: () => void; items: import("@/types/ops").WorkItem[] }) {
+  const approvedItems = items.filter(item => item.approvedBy && item.approvedAt);
   return (
-    <section className="surface-strong rounded-lg p-5">
-      <div className="flex items-center justify-between gap-3"><h3 className="font-bold">감사 로그</h3><button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold hover:bg-gray-50">초기화</button></div>
-      <div className="mt-3 grid gap-2">
-        {audit.map((item) => <div key={item.id} className="grid gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{item.event}</span></div>)}
+    <section className="surface-strong rounded-lg p-5 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-bold">감사 로그</h3>
+        <button onClick={resetLocal} className="focus-ring inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold hover:bg-gray-50">초기화</button>
+      </div>
+
+      {/* Approval history table */}
+      {approvedItems.length > 0 ? (
+        <div>
+          <h4 className="mb-3 text-sm font-bold text-slate-700">승인 이력</h4>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">티켓 ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">제목</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">요청자</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">승인자</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">승인시간</th>
+                  <th className="px-4 py-3 text-left text-xs font-black text-slate-500">상태</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {approvedItems.map((item) => (
+                  <tr key={item.id} className="bg-white hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.id}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-800 max-w-[200px] truncate">{item.title}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.requester}</td>
+                    <td className="px-4 py-3 font-bold text-blue-700">{item.approvedBy}</td>
+                    <td className="px-4 py-3 text-slate-500">{item.approvedAt}</td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                        item.status === "완료" ? "bg-emerald-50 text-emerald-700" :
+                        item.status === "보류" ? "bg-rose-50 text-rose-700" :
+                        "bg-blue-50 text-blue-700"
+                      }`}>{item.status}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-400">아직 승인 이력이 없습니다.</p>
+      )}
+
+      <div>
+        <h4 className="mb-3 text-sm font-bold text-slate-700">전체 로그</h4>
+        <div className="grid gap-2">
+          {audit.map((item) => <div key={item.id} className="grid gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm md:grid-cols-[80px_140px_1fr]"><span className="text-muted-foreground">{item.at}</span><strong>{item.actor}</strong><span>{item.event}</span></div>)}
+        </div>
       </div>
     </section>
   );

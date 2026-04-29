@@ -5,6 +5,8 @@ import {
   Bot,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   HardDrive,
   HelpCircle,
@@ -51,6 +53,7 @@ type RequestDraft = {
   urgentReason: string;
   urgentImpact: string;
   resubmitId?: string;
+  requestedDate?: string;
 };
 
 function extractCleanName(rawName: string) {
@@ -247,6 +250,10 @@ export function UserPortal() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
   const [symptomQuery, setSymptomQuery] = useState("");
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+  const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [diagnosis, setDiagnosis] = useState<{
     diagnosis: string;
     solution: string[];
@@ -258,6 +265,26 @@ export function UserPortal() {
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
   const shouldLoadPartPrices =
     draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기");
+
+  // Load Korean public holidays for current + next year using date-holidays
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { default: Holidays } = await import("date-holidays");
+        const hd = new Holidays("KR");
+        const years = [new Date().getFullYear(), new Date().getFullYear() + 1];
+        const dateSet = new Set<string>();
+        for (const year of years) {
+          for (const h of hd.getHolidays(year)) {
+            dateSet.add(h.date.slice(0, 10));
+          }
+        }
+        setHolidays(dateSet);
+      } catch {
+        // gracefully degrade if package unavailable
+      }
+    })();
+  }, []);
   const allPartIds = useMemo(() => equipmentParts.map((part) => part.id), []);
   const { quotes: livePartQuotes, isLoading: isPartPriceLoading, lastCheckedAt, refresh: refreshPartPrices } = useLivePartPrices(allPartIds, shouldLoadPartPrices);
   const liveEquipmentParts = useMemo(
@@ -597,6 +624,49 @@ export function UserPortal() {
     window.open(url, "_blank");
   };
 
+  // Calendar helpers
+  const defaultRequestedDate = useMemo(() => {
+    // default = 1 week from today, skip weekends & holidays
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    // advance if holiday or weekend
+    let safety = 0;
+    while (safety < 14) {
+      const ds = fmt(d);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6 && !holidays.has(ds)) break;
+      d.setDate(d.getDate() + 1);
+      safety++;
+    }
+    return fmt(d);
+  }, [holidays]);
+
+  const isDateDisabled = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) return true;
+    if (holidays.has(dateStr)) return true;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (d <= today) return true;
+    return false;
+  };
+
+  const calendarDays = useMemo(() => {
+    const year = calendarYear;
+    const month = calendarMonth;
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const days: (string | null)[] = Array(firstDay).fill(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      days.push(`${year}-${pad(month + 1)}-${pad(d)}`);
+    }
+    return days;
+  }, [calendarYear, calendarMonth]);
+
   const loadForResubmit = (item: WorkItem) => {
     const categoryMap: Record<string, Category> = {
       "전산 장비": "equipment",
@@ -640,7 +710,15 @@ export function UserPortal() {
   const defaultTitle = ["equipment", "as"].includes(draft.category) ? selected.title : `${selected.title} 요청`;
 
   const submit = async () => {
-    if (draft.urgency === "긴급" && !draft.urgentReason.trim()) return;
+    // Required field validation
+    if (!draft.academy.trim()) {
+      pushToast("학원(지점)을 선택해주세요.", "error");
+      return;
+    }
+    if (draft.urgency === "긴급" && !draft.urgentReason.trim()) {
+      pushToast("긴급 사유를 입력해주세요.", "error");
+      return;
+    }
     const finalTitle = draft.title.trim() || defaultTitle;
 
     setIsLoading(true);
@@ -712,7 +790,7 @@ export function UserPortal() {
         owner: "학원 관리자",
         status: "접수",
         priority,
-        due: draft.urgency === "긴급" ? "오늘" : "신규",
+        due: draft.requestedDate ?? (draft.urgency === "긴급" ? "오늘" : "신규"),
         audit: "사용자 포털 접수 - 학원 관리자 승인 대기",
         description,
         approvalStep: 0,
@@ -721,7 +799,8 @@ export function UserPortal() {
         urgentReason: draft.urgency === "긴급" ? draft.urgentReason : undefined,
         urgentImpact: draft.urgency === "긴급" ? draft.urgentImpact : undefined,
         evidenceFiles: files.map((file) => file.name),
-        amount
+        amount,
+        requestedDate: draft.requestedDate
       };
 
       try {
@@ -1231,8 +1310,14 @@ export function UserPortal() {
                         <option>기타 장비</option>
                       </select>
                     ) : null}
-                    <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
-                      <option value="" disabled>선택해주세요</option>
+                    <select
+                      value={draft.academy}
+                      onChange={(event) => setDraft({ ...draft, academy: event.target.value })}
+                      className={`field ${!draft.academy ? "border-red-300 ring-1 ring-red-200" : ""}`}
+                      aria-label="학원 (필수)"
+                      required
+                    >
+                      <option value="" disabled>선택해주세요 *</option>
                       <option>통합학원(본사)</option>
                       <option>학원(지점A)</option>
                       <option>학원(지점B)</option>
@@ -1471,6 +1556,87 @@ export function UserPortal() {
                   {files.length}개 파일 선택됨: {files.map((file) => file.name).join(", ")}
                 </div>
               ) : null}
+              {/* Date picker */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!calendarOpen) {
+                      const sel = draft.requestedDate ?? defaultRequestedDate;
+                      const d = new Date(sel);
+                      setCalendarYear(d.getFullYear());
+                      setCalendarMonth(d.getMonth());
+                      if (!draft.requestedDate) setDraft({ ...draft, requestedDate: sel });
+                    }
+                    setCalendarOpen((prev) => !prev);
+                  }}
+                  className="inline-flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <span>흭망 완료일: <span className="text-blue-700">{draft.requestedDate ?? defaultRequestedDate}</span></span>
+                  <ChevronDown className="h-4 w-4 text-slate-400" />
+                </button>
+                {calendarOpen ? (
+                  <div className="absolute left-0 top-12 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+                    <div className="mb-3 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(y => y - 1); }
+                          else setCalendarMonth(m => m - 1);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
+                      ><ChevronLeft className="h-4 w-4" /></button>
+                      <span className="text-sm font-black text-slate-800">{calendarYear}년 {calendarMonth + 1}월</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(y => y + 1); }
+                          else setCalendarMonth(m => m + 1);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100"
+                      ><ChevronRight className="h-4 w-4" /></button>
+                    </div>
+                    <div className="mb-1 grid grid-cols-7 text-center">
+                      {["일","월","화","수","목","금","토"].map(d => (
+                        <span key={d} className={`text-[10px] font-black pb-1 ${d === "일" ? "text-rose-500" : d === "토" ? "text-blue-500" : "text-slate-400"}`}>{d}</span>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-7 gap-0.5">
+                      {calendarDays.map((ds, i) => {
+                        if (!ds) return <span key={`empty-${i}`} />;
+                        const disabled = isDateDisabled(ds);
+                        const selected = (draft.requestedDate ?? defaultRequestedDate) === ds;
+                        const dow = new Date(ds).getDay();
+                        const isHoliday = holidays.has(ds);
+                        return (
+                          <button
+                            key={ds}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => { setDraft({ ...draft, requestedDate: ds }); setCalendarOpen(false); }}
+                            className={`h-8 w-full rounded-lg text-xs font-bold transition-all ${
+                              selected
+                                ? "bg-blue-600 text-white shadow"
+                                : disabled
+                                  ? "cursor-not-allowed text-slate-200"
+                                  : isHoliday
+                                    ? "text-rose-400 hover:bg-rose-50"
+                                    : dow === 0
+                                      ? "text-rose-500 hover:bg-rose-50"
+                                      : dow === 6
+                                        ? "text-blue-500 hover:bg-blue-50"
+                                        : "text-slate-700 hover:bg-slate-100"
+                            }`}
+                          >
+                            {Number(ds.slice(8))}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[10px] text-slate-400">• 과거, 금일, 주말, 공휴일은 선택불가</p>
+                  </div>
+                ) : null}
+              </div>
               {draft.urgency === "긴급" ? (
                 <div className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
                   <div>
