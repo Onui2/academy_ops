@@ -48,6 +48,20 @@ type RequestDraft = {
   requestItem?: string;
   title: string;
   academy: string;
+  location: string;
+  quantity: string;
+  usagePurpose: string;
+  currentModel: string;
+  replacementStatus: string;
+  issueStartedAt: string;
+  issueMessage: string;
+  attemptedAction: string;
+  userEmail: string;
+  folderName: string;
+  permissionLevel: "" | "read" | "write" | "admin";
+  tabletAction: "" | "신규 대여" | "연장" | "반납";
+  usageDuration: string;
+  impactScope: string;
   detail: string;
   urgency: "보통" | "빠름" | "긴급";
   urgentReason: string;
@@ -55,6 +69,34 @@ type RequestDraft = {
   resubmitId?: string;
   requestedDate?: string;
 };
+
+function createEmptyDraft(category: Category = "equipment", requestItem = "데스크톱"): RequestDraft {
+  return {
+    category,
+    requestItem: category === "equipment" ? requestItem : undefined,
+    title: "",
+    academy: "",
+    location: "",
+    quantity: "",
+    usagePurpose: "",
+    currentModel: "",
+    replacementStatus: "",
+    issueStartedAt: "",
+    issueMessage: "",
+    attemptedAction: "",
+    userEmail: "",
+    folderName: "",
+    permissionLevel: "",
+    tabletAction: "",
+    usageDuration: "",
+    impactScope: "",
+    detail: "",
+    urgency: "보통",
+    urgentReason: "",
+    urgentImpact: "",
+    requestedDate: undefined
+  };
+}
 
 function extractCleanName(rawName: string) {
   if (!rawName) return "직원";
@@ -229,16 +271,7 @@ const categoryWorkflowGuide: Record<
 export function UserPortal() {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<"request-start" | "request-status" | "request-workflow" | "request-help">("request-start");
-  const [draft, setDraft] = useState<RequestDraft>({
-    category: "other",
-    requestItem: undefined,
-    title: "",
-    academy: "",
-    detail: "",
-    urgency: "보통",
-    urgentReason: "",
-    urgentImpact: ""
-  });
+  const [draft, setDraft] = useState<RequestDraft>(createEmptyDraft("other"));
   const [submitted, setSubmitted] = useState<WorkItem[]>([]);
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -670,21 +703,28 @@ export function UserPortal() {
   const loadForResubmit = (item: WorkItem) => {
     const categoryMap: Record<string, Category> = {
       "전산 장비": "equipment",
+      "부품 구매": "equipment",
       "A/S": "as",
       "NAS": "nas",
       "태블릿": "tablet",
       "기타": "other"
     };
 
+    const nextCategory = categoryMap[item.module] ?? "other";
+    const nextRequestItem =
+      item.module === "전산 장비" || item.module === "부품 구매"
+        ? extractRequestItem(item.description)
+        : undefined;
+
     setDraft({
-      category: categoryMap[item.module] ?? "other",
-      requestItem: item.module === "전산 장비" ? extractRequestItem(item.description) : undefined,
+      ...createEmptyDraft(nextCategory, nextRequestItem ?? "데스크톱"),
       title: item.title,
       academy: item.requester,
       detail: item.description ?? "",
       urgency: item.priority === "긴급" ? "긴급" : item.priority === "높음" ? "빠름" : "보통",
       urgentReason: item.urgentReason ?? "",
       urgentImpact: item.urgentImpact ?? "",
+      requestedDate: item.requestedDate,
       resubmitId: item.id
     });
 
@@ -705,18 +745,65 @@ export function UserPortal() {
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category, draft.requestItem]);
+  const validationMessage = useMemo(() => {
+    if (!draft.title.trim()) return "요청 제목을 입력해주세요.";
+    if (!draft.academy.trim()) return "학원(지점)을 선택해주세요.";
+
+    if (draft.category === "equipment") {
+      if (!draft.requestItem?.trim()) return "장비 종류를 선택해주세요.";
+      if (!draft.quantity.trim()) return "필요 수량을 입력해주세요.";
+      if (!draft.location.trim()) return "설치 또는 사용 위치를 입력해주세요.";
+      if (!draft.usagePurpose.trim()) return "장비 사용 목적을 입력해주세요.";
+      if (!draft.detail.trim()) return "추가 요청 내용을 입력해주세요.";
+    }
+
+    if (draft.category === "as") {
+      if (!draft.location.trim()) return "문제가 발생한 위치를 입력해주세요.";
+      if (!draft.issueStartedAt.trim()) return "문제가 언제부터 발생했는지 입력해주세요.";
+      if (!draft.issueMessage.trim()) return "증상 또는 에러 문구를 입력해주세요.";
+      if (!draft.attemptedAction.trim()) return "이미 시도한 조치를 입력해주세요.";
+      if (!draft.detail.trim()) return "상세 설명을 입력해주세요.";
+    }
+
+    if (draft.category === "nas") {
+      if (!draft.userEmail.trim()) return "접속이 필요한 사용자 이메일을 입력해주세요.";
+      if (!draft.folderName.trim()) return "필요한 폴더명 또는 공유 경로를 입력해주세요.";
+      if (!draft.permissionLevel) return "필요 권한 수준을 선택해주세요.";
+      if (!draft.detail.trim()) return "추가 요청 내용을 입력해주세요.";
+    }
+
+    if (draft.category === "tablet") {
+      if (!draft.tabletAction) return "태블릿 요청 유형을 선택해주세요.";
+      if (!draft.quantity.trim()) return "필요 대수를 입력해주세요.";
+      if (!draft.location.trim()) return "사용 장소를 입력해주세요.";
+      if (!draft.usageDuration.trim()) return "사용 기간을 입력해주세요.";
+      if (!draft.usagePurpose.trim()) return "사용 목적을 입력해주세요.";
+      if (!draft.detail.trim()) return "추가 요청 내용을 입력해주세요.";
+    }
+
+    if (draft.category === "other") {
+      if (!draft.location.trim()) return "발생 위치 또는 필요한 장소를 입력해주세요.";
+      if (!draft.impactScope.trim()) return "영향 범위를 입력해주세요.";
+      if (!draft.detail.trim()) return "상세 내용을 입력해주세요.";
+    }
+
+    if (draft.urgency === "긴급" && !draft.urgentReason.trim()) return "긴급 사유를 입력해주세요.";
+    if (draft.urgency === "긴급" && !draft.urgentImpact.trim()) return "영향 범위를 입력해주세요.";
+    return null;
+  }, [draft]);
   const priorityLabel: WorkPriority = draft.urgency === "긴급" ? "긴급" : draft.urgency === "빠름" ? "높음" : "보통";
+  const priorityTone =
+    priorityLabel === "긴급"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : priorityLabel === "높음"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-blue-200 bg-blue-50 text-blue-700";
   const estimatedOwner = draft.category === "nas" ? "NAS 관리자" : draft.category === "as" ? "전산" : "학원 관리자";
   const defaultTitle = ["equipment", "as"].includes(draft.category) ? selected.title : `${selected.title} 요청`;
 
   const submit = async () => {
-    // Required field validation
-    if (!draft.academy.trim()) {
-      pushToast("학원(지점)을 선택해주세요.", "error");
-      return;
-    }
-    if (draft.urgency === "긴급" && !draft.urgentReason.trim()) {
-      pushToast("긴급 사유를 입력해주세요.", "error");
+    if (validationMessage) {
+      pushToast(validationMessage, "error");
       return;
     }
     const finalTitle = draft.title.trim() || defaultTitle;
@@ -730,11 +817,20 @@ export function UserPortal() {
     const basketDesc = partsBasket.map((p) => `- ${p.name}: ${p.price.toLocaleString()}원`).join("\n");
     const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
 
+    const permissionLabel =
+      draft.permissionLevel === "write" ? "읽기/쓰기" : draft.permissionLevel === "admin" ? "관리자" : draft.permissionLevel === "read" ? "읽기" : "";
+
     const description = [
       draft.category === "equipment" && draft.requestItem ? `요청 장비: ${draft.requestItem}` : "",
-      draft.category === "tablet" ? `처리 유형: ${draft.title.includes("연장") ? "연장" : draft.title.includes("반납") ? "반납" : "신규"}\n${draft.detail}` : draft.detail,
-      draft.category === "nas" ? "안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다." : "",
+      draft.category === "equipment" ? `필요 수량: ${draft.quantity}\n설치 위치: ${draft.location}\n사용 목적: ${draft.usagePurpose}` : "",
+      draft.category === "equipment" && draft.currentModel ? `기존 장비/모델: ${draft.currentModel}` : "",
+      draft.category === "equipment" && draft.replacementStatus ? `교체 여부: ${draft.replacementStatus}` : "",
+      draft.category === "as" ? `발생 위치: ${draft.location}\n문제 시작 시점: ${draft.issueStartedAt}\n증상/에러 문구: ${draft.issueMessage}\n이미 시도한 조치: ${draft.attemptedAction}${draft.impactScope ? `\n영향 범위: ${draft.impactScope}` : ""}` : "",
+      draft.category === "nas" ? `사용자 이메일: ${draft.userEmail}\n필요 폴더: ${draft.folderName}\n권한 수준: ${permissionLabel || "미지정"}\n안내: 권한 요청 처리 후 접속 가이드가 함께 발송됩니다.` : "",
+      draft.category === "tablet" ? `처리 유형: ${draft.tabletAction}\n필요 대수: ${draft.quantity}\n사용 장소: ${draft.location}\n사용 기간: ${draft.usageDuration}\n사용 목적: ${draft.usagePurpose}` : "",
+      draft.category === "other" ? `발생 위치: ${draft.location}\n영향 범위: ${draft.impactScope}` : "",
       (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") ? `요청 부품 목록:\n${basketDesc}\n\n합계: ${basketTotal.toLocaleString()}원` : "",
+      draft.detail,
       files.length ? `\n첨부 파일: ${files.map((file) => file.name).join(", ")}` : ""
     ].filter(Boolean).join("\n");
 
@@ -809,9 +905,9 @@ export function UserPortal() {
           await createRequest(supabase, user, item);
           if (draft.category === "nas") {
             await createNasPermissionRequest(supabase, {
-              user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? user.email ?? "unknown@academy.local",
-              resource_name: finalTitle,
-              permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read",
+              user_email: draft.userEmail.trim() || user.email || "unknown@academy.local",
+              resource_name: draft.folderName.trim() || finalTitle,
+              permission_level: draft.permissionLevel || "read",
               requested_by: user.id
             });
           }
@@ -826,9 +922,9 @@ export function UserPortal() {
               nasPermission:
                 draft.category === "nas"
                   ? {
-                      user_email: draft.detail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "unknown@academy.local",
-                      resource_name: finalTitle,
-                      permission_level: /쓰기|write/i.test(draft.detail) ? "write" : "read"
+                      user_email: draft.userEmail.trim() || "unknown@academy.local",
+                      resource_name: draft.folderName.trim() || finalTitle,
+                      permission_level: draft.permissionLevel || "read"
                     }
                   : undefined
             })
@@ -852,7 +948,7 @@ export function UserPortal() {
     await loadHistory();
     setActiveSection("request-status");
     window.scrollTo({ top: 0, behavior: "smooth" });
-    setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" });
+    setDraft(createEmptyDraft("equipment", "데스크톱"));
     setPartsBasket([]);
     setFiles([]);
     setAsStep("searching");
@@ -1058,7 +1154,10 @@ export function UserPortal() {
                     <button
                       key={item.id}
                       onClick={() => {
-                        const newDraft = { ...draft, category: item.id };
+                        const newDraft = createEmptyDraft(item.id, "데스크톱");
+                        newDraft.academy = draft.academy;
+                        newDraft.requestedDate = draft.requestedDate;
+                        newDraft.urgency = draft.urgency;
                         if (item.id === "equipment") {
                           newDraft.requestItem = "데스크톱";
                           setSelectedPartCategory("PC");
@@ -1066,6 +1165,9 @@ export function UserPortal() {
                         } else {
                           setSelectedPartCategory(null);
                           setSelectedSubCategory(null);
+                        }
+                        if (item.id === "as") {
+                          setAsStep("searching");
                         }
                         setDraft(newDraft);
                       }}
@@ -1183,12 +1285,27 @@ export function UserPortal() {
 
           {activeSection === "request-start" ? (
           <section className="rounded-lg border border-gray-200 bg-white p-5">
-            <div className="flex items-center gap-3">
+            <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-slate-50 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Internal Request Form</p>
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900">경영지원 요청서</h2>
+                  <p className="mt-2 text-sm text-slate-500">운영팀 검토와 승인 라우팅에 필요한 정보를 한 번에 정리하는 접수 문서입니다.</p>
+                </div>
+                <div className={`rounded-2xl border px-4 py-3 text-center shadow-sm ${priorityTone}`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Processing</p>
+                  <p className="mt-1 text-sm font-black">{priorityLabel}</p>
+                  <p className="text-xs opacity-80">{draft.requestedDate ?? defaultRequestedDate}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center gap-3">
               <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${selected.tone}`}>
                 <SelectedIcon className="h-5 w-5" aria-hidden="true" />
               </div>
               <div>
-                <h2 className="font-bold">{selected.title}</h2>
+                <h3 className="font-bold">{selected.title}</h3>
                 <p className="text-sm text-gray-500">{helperText}</p>
               </div>
             </div>
@@ -1324,6 +1441,169 @@ export function UserPortal() {
                       <option>학원(지점C)</option>
                     </select>
                   </div>
+
+                  {draft.category === "equipment" ? (
+                    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                      <input
+                        value={draft.quantity}
+                        onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+                        className="field bg-white"
+                        placeholder="필요 수량 *"
+                      />
+                      <input
+                        value={draft.location}
+                        onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                        className="field bg-white"
+                        placeholder="설치/사용 위치 *"
+                      />
+                      <input
+                        value={draft.usagePurpose}
+                        onChange={(event) => setDraft({ ...draft, usagePurpose: event.target.value })}
+                        className="field bg-white"
+                        placeholder="사용 목적 *"
+                      />
+                      <input
+                        value={draft.currentModel}
+                        onChange={(event) => setDraft({ ...draft, currentModel: event.target.value })}
+                        className="field bg-white"
+                        placeholder="기존 장비 모델명 또는 희망 사양"
+                      />
+                      <select
+                        value={draft.replacementStatus}
+                        onChange={(event) => setDraft({ ...draft, replacementStatus: event.target.value })}
+                        className="field bg-white sm:col-span-2"
+                      >
+                        <option value="">교체 여부 선택</option>
+                        <option value="신규 설치">신규 설치</option>
+                        <option value="기존 장비 교체">기존 장비 교체</option>
+                        <option value="추가 증설">추가 증설</option>
+                      </select>
+                    </div>
+                  ) : null}
+
+                  {draft.category === "as" ? (
+                    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                      <input
+                        value={draft.location}
+                        onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                        className="field bg-white"
+                        placeholder="문제 발생 위치 *"
+                      />
+                      <input
+                        value={draft.issueStartedAt}
+                        onChange={(event) => setDraft({ ...draft, issueStartedAt: event.target.value })}
+                        className="field bg-white"
+                        placeholder="언제부터 문제인지 *"
+                      />
+                      <input
+                        value={draft.issueMessage}
+                        onChange={(event) => setDraft({ ...draft, issueMessage: event.target.value })}
+                        className="field bg-white sm:col-span-2"
+                        placeholder="증상/에러 문구 *"
+                      />
+                      <input
+                        value={draft.attemptedAction}
+                        onChange={(event) => setDraft({ ...draft, attemptedAction: event.target.value })}
+                        className="field bg-white sm:col-span-2"
+                        placeholder="이미 시도한 조치 *"
+                      />
+                      <input
+                        value={draft.impactScope}
+                        onChange={(event) => setDraft({ ...draft, impactScope: event.target.value })}
+                        className="field bg-white sm:col-span-2"
+                        placeholder="영향 범위 (예: 2개 강의실 수업 차질)"
+                      />
+                    </div>
+                  ) : null}
+
+                  {draft.category === "nas" ? (
+                    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                      <input
+                        value={draft.userEmail}
+                        onChange={(event) => setDraft({ ...draft, userEmail: event.target.value })}
+                        className="field bg-white"
+                        placeholder="사용자 이메일 *"
+                      />
+                      <input
+                        value={draft.folderName}
+                        onChange={(event) => setDraft({ ...draft, folderName: event.target.value })}
+                        className="field bg-white"
+                        placeholder="필요 폴더명/공유 경로 *"
+                      />
+                      <select
+                        value={draft.permissionLevel}
+                        onChange={(event) => setDraft({ ...draft, permissionLevel: event.target.value as RequestDraft["permissionLevel"] })}
+                        className="field bg-white"
+                      >
+                        <option value="">권한 수준 선택 *</option>
+                        <option value="read">읽기</option>
+                        <option value="write">읽기/쓰기</option>
+                        <option value="admin">관리자</option>
+                      </select>
+                      <input
+                        value={draft.location}
+                        onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                        className="field bg-white"
+                        placeholder="사용 부서/위치"
+                      />
+                    </div>
+                  ) : null}
+
+                  {draft.category === "tablet" ? (
+                    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                      <select
+                        value={draft.tabletAction}
+                        onChange={(event) => setDraft({ ...draft, tabletAction: event.target.value as RequestDraft["tabletAction"] })}
+                        className="field bg-white"
+                      >
+                        <option value="">요청 유형 선택 *</option>
+                        <option value="신규 대여">신규 대여</option>
+                        <option value="연장">연장</option>
+                        <option value="반납">반납</option>
+                      </select>
+                      <input
+                        value={draft.quantity}
+                        onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+                        className="field bg-white"
+                        placeholder="필요 대수 *"
+                      />
+                      <input
+                        value={draft.location}
+                        onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                        className="field bg-white"
+                        placeholder="사용 장소 *"
+                      />
+                      <input
+                        value={draft.usageDuration}
+                        onChange={(event) => setDraft({ ...draft, usageDuration: event.target.value })}
+                        className="field bg-white"
+                        placeholder="사용 기간 *"
+                      />
+                      <input
+                        value={draft.usagePurpose}
+                        onChange={(event) => setDraft({ ...draft, usagePurpose: event.target.value })}
+                        className="field bg-white sm:col-span-2"
+                        placeholder="사용 목적 *"
+                      />
+                    </div>
+                  ) : null}
+
+                  {draft.category === "other" ? (
+                    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                      <input
+                        value={draft.location}
+                        onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                        className="field bg-white"
+                        placeholder="발생 위치/필요 장소 *"
+                      />
+                      <input
+                        value={draft.impactScope}
+                        onChange={(event) => setDraft({ ...draft, impactScope: event.target.value })}
+                        className="field bg-white"
+                        placeholder="영향 범위 *"
+                      />
+                    </div>
+                  ) : null}
 
                   {(draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기")) && (
                     <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
@@ -1665,7 +1945,7 @@ export function UserPortal() {
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
-                onClick={() => setDraft({ category: "equipment", requestItem: "데스크톱", title: "", academy: "", detail: "", urgency: "보통", urgentReason: "", urgentImpact: "" })}
+                onClick={() => setDraft(createEmptyDraft("equipment", "데스크톱"))}
                 className="text-center text-sm font-semibold text-gray-500 hover:text-gray-800"
               >
                 취소하고 새로 작성하기
