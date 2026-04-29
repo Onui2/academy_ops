@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Stethoscope,
   Trash2,
+  UserRound,
   UserCog,
   X
 } from "lucide-react";
@@ -1219,12 +1220,12 @@ export function OpsConsole() {
                 onClick={() => setIsProfileOpen((current) => !current)}
                 className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:bg-slate-50"
               >
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                  <UserRound className="h-5 w-5" aria-hidden="true" />
+                </div>
                 <div className="hidden min-w-0 sm:block">
                   <p className="truncate text-sm font-black text-slate-900">{userDisplayName}</p>
                   <p className="truncate text-xs text-slate-500">{userDisplayBranch}</p>
-                </div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-blue-200 bg-blue-100 shadow-sm">
-                  <span className="text-sm font-bold text-blue-700">{userDisplayName.charAt(0)}</span>
                 </div>
                 <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isProfileOpen ? "rotate-180" : ""}`} aria-hidden="true" />
               </button>
