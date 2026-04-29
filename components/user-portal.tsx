@@ -441,7 +441,7 @@ export function UserPortal() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900">경영지원 운영 허브</h1>
-            <p className="text-sm text-slate-500">손샘학원 경영지원 통합 운영 시스템</p>
+            <p className="text-sm text-slate-500">경영지원 통합 운영 시스템</p>
           </div>
           <Link href="/" className="ml-auto rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50">
             관리자
@@ -652,10 +652,10 @@ export function UserPortal() {
                     ) : null}
                     <select value={draft.academy} onChange={(event) => setDraft({ ...draft, academy: event.target.value })} className="field" aria-label="학원">
                       <option value="" disabled>선택해주세요</option>
-                      <option>손샘학원(본사)</option>
-                      <option>손샘(수원)</option>
-                      <option>손샘(대치)</option>
-                      <option>손샘(범어)</option>
+                      <option>통합학원(본사)</option>
+                      <option>학원(지점A)</option>
+                      <option>학원(지점B)</option>
+                      <option>학원(지점C)</option>
                     </select>
                   </div>
 

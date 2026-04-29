@@ -157,7 +157,7 @@ const defaultForm: RequestForm = {
   module: "전산 장비",
   requestItem: "데스크톱 본체",
   title: "",
-  requester: "손샘학원(본사)",
+  requester: "학원본사",
   requesterContact: "",
   neededDate: new Date().toISOString().slice(0, 10),
   priority: "보통",
@@ -652,7 +652,7 @@ export function OpsConsole() {
   const createAsTicket = () => addRequest({
     module: "A/S",
     title: symptom,
-    requester: "손샘학원(본사)",
+    requester: "학원본사",
     owner: "전산",
     status: diagnosis.escalation ? "진행" : "검토",
     priority: diagnosis.escalation ? "높음" : "보통",
@@ -1327,7 +1327,7 @@ function EquipmentScreen({
 
           <div className="divide-y divide-slate-200">
             <EquipmentRow label="학원/지점">
-              <input value={equipment.academy} onChange={(event) => setEquipment({ ...equipment, academy: event.target.value })} className="field w-full" placeholder="손샘학원(대구)" />
+              <input value={equipment.academy} onChange={(event) => setEquipment({ ...equipment, academy: event.target.value })} className="field w-full" placeholder="학원(지점)" />
             </EquipmentRow>
             <EquipmentRow label="품목">
               <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
@@ -2036,7 +2036,7 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
             <div className="grid gap-4 p-5 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 부서/지점")}</span>
-                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className={`field ${showError("requester") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="손샘학원(본사)" />
+                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className={`field ${showError("requester") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="학원본사" />
                 <FieldError message="요청 부서/지점을 입력해 주세요." visible={showError("requester")} />
               </label>
               <label className="grid gap-2">
@@ -2572,7 +2572,7 @@ function TabletScreen({ tablet, setTablet, createTabletRequest, role }: { tablet
                </div>
             </EquipmentRow>
             <EquipmentRow label="학원/지점">
-               <input value={tablet.academy} onChange={(e) => setTablet({...tablet, academy: e.target.value})} className="field w-full" placeholder="손샘학원(본사)" />
+               <input value={tablet.academy} onChange={(e) => setTablet({...tablet, academy: e.target.value})} className="field w-full" placeholder="학원본사" />
             </EquipmentRow>
             <EquipmentRow label="모델">
                <select value={tablet.model} onChange={(e) => setTablet({...tablet, model: e.target.value})} className="field w-full">

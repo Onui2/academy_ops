@@ -423,9 +423,6 @@ export function TeacherAccessGate({
               Teacher Login
             </div>
             <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-900">경영지원 운영 포털</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-              teacher.flipedu.net과 같은 순서로 학원을 조회한 뒤 지점을 선택하고 로그인합니다.
-            </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
@@ -452,12 +449,6 @@ export function TeacherAccessGate({
                 <p className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Portal Access</p>
                 <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900">teacher 로그인</h2>
               </div>
-              <Link
-                href={portal === "admin" ? "/user" : "/"}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
-              >
-                {portal === "admin" ? "사용자" : "관리자"}
-              </Link>
             </div>
 
             <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
