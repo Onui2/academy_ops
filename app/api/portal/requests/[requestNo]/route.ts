@@ -1,45 +1,41 @@
 import { NextResponse } from "next/server";
-import { deletePortalRequest, updatePortalRequest } from "@/lib/portal-request-service";
+import { HarnessError, isHarnessError } from "@/lib/harness/harness-error";
+import { runAuditHarness } from "@/lib/harness/audit/audit-harness";
+import { runSecurityHarness } from "@/lib/harness/security/security-harness";
 import { createServiceSupabaseClient } from "@/lib/server-supabase";
-import { readTeacherSessionFromCookieHeader } from "@/lib/teacher-session";
+import { deleteRequestForActor, updateRequestFromPortalActor } from "@/lib/services/request-hub-service";
 import type { WorkItem } from "@/types/ops";
+
+function errorResponse(error: unknown, fallback: string) {
+  if (isHarnessError(error)) {
+    return NextResponse.json({ message: error.exposeMessage }, { status: error.status });
+  }
+
+  console.error("[portal-request-item]", error);
+  return NextResponse.json({ message: fallback }, { status: 500 });
+}
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ requestNo: string }> }
 ) {
-  const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
-  if (!session) {
-    return NextResponse.json({ message: "teacher 세션이 없습니다." }, { status: 401 });
-  }
-
-  const supabase = createServiceSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ message: "서버 Supabase 설정이 누락되었습니다." }, { status: 503 });
-  }
-
-  const { requestNo } = await context.params;
-
-  let body: { item?: WorkItem } = {};
-
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ message: "요청 형식이 올바르지 않습니다." }, { status: 400 });
-  }
+    const body = (await request.json()) as { item?: WorkItem };
+    if (!body.item) {
+      throw new HarnessError("Missing request payload.", 400, "수정할 요청 데이터가 없습니다.");
+    }
 
-  if (!body.item) {
-    return NextResponse.json({ message: "수정할 요청 데이터가 없습니다." }, { status: 400 });
-  }
+    const { requestNo } = await context.params;
+    const security = runSecurityHarness(request, body);
+    const supabase = createServiceSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ message: "서버 설정이 완료되지 않았습니다." }, { status: 503 });
+    }
 
-  try {
-    await updatePortalRequest(supabase, requestNo, body.item, session);
+    await updateRequestFromPortalActor(supabase, security.actor, requestNo, body.item, security.auditContext);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "요청 수정에 실패했습니다." },
-      { status: 500 }
-    );
+    return errorResponse(error, "요청을 수정하지 못했습니다.");
   }
 }
 
@@ -47,25 +43,39 @@ export async function DELETE(
   request: Request,
   context: { params: Promise<{ requestNo: string }> }
 ) {
-  const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
-  if (!session || session.portalRole !== "admin") {
-    return NextResponse.json({ message: "삭제 권한이 없습니다." }, { status: 403 });
-  }
-
-  const supabase = createServiceSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ message: "서버 Supabase 설정이 누락되었습니다." }, { status: 503 });
-  }
-
-  const { requestNo } = await context.params;
+  let actor: ReturnType<typeof runSecurityHarness>["actor"] | null = null;
+  let auditContext: ReturnType<typeof runSecurityHarness>["auditContext"] | null = null;
 
   try {
-    await deletePortalRequest(supabase, requestNo);
+    const { requestNo } = await context.params;
+    const security = runSecurityHarness(request);
+    actor = security.actor;
+    auditContext = security.auditContext;
+
+    const supabase = createServiceSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ message: "서버 설정이 완료되지 않았습니다." }, { status: 503 });
+    }
+
+    await deleteRequestForActor(supabase, actor, requestNo, auditContext);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "요청 삭제에 실패했습니다." },
-      { status: 500 }
-    );
+    if (actor && auditContext) {
+      const supabase = createServiceSupabaseClient();
+      if (supabase && isHarnessError(error) && error.status === 403) {
+        await runAuditHarness(supabase, {
+          actorUserId: actor.actorUserId,
+          actorName: actor.actorName,
+          actionType: "REQUEST_ACCESS_DENIED",
+          targetType: "request",
+          targetId: "request-delete",
+          ipAddress: auditContext.ipAddress,
+          userAgent: auditContext.userAgent,
+          summary: "요청 삭제 접근이 거부되었습니다."
+        }).catch(() => undefined);
+      }
+    }
+
+    return errorResponse(error, "요청을 삭제하지 못했습니다.");
   }
 }

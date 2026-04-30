@@ -41,6 +41,15 @@ export type WorkItem = {
   approvedBy?: string;
   approvedAt?: string;
   requestedDate?: string;
+  workflowStatus?: string;
+  slaDueAt?: string | null;
+  slaPausedAt?: string | null;
+  completedAt?: string | null;
+  assignedDepartment?: string | null;
+  assignedUserId?: string | null;
+  assignedUserName?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ModuleSummary = {

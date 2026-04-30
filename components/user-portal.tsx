@@ -285,6 +285,7 @@ export function UserPortal() {
   const [asStep, setAsStep] = useState<"searching" | "form">("searching");
   const [symptomQuery, setSymptomQuery] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
@@ -319,6 +320,18 @@ export function UserPortal() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!isComposerOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isComposerOpen]);
+
   const allPartIds = useMemo(() => equipmentParts.map((part) => part.id), []);
   const { quotes: livePartQuotes, isLoading: isPartPriceLoading, lastCheckedAt, refresh: refreshPartPrices } = useLivePartPrices(allPartIds, shouldLoadPartPrices);
   const liveEquipmentParts = useMemo(
@@ -660,9 +673,9 @@ export function UserPortal() {
 
   // Calendar helpers
   const defaultRequestedDate = useMemo(() => {
-    // default = 1 week from today, skip weekends & holidays
+    // default = 8 days from today, skip weekends & holidays
     const d = new Date();
-    d.setDate(d.getDate() + 7);
+    d.setDate(d.getDate() + 8);
     const pad = (n: number) => String(n).padStart(2, "0");
     const fmt = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     // advance if holiday or weekend
@@ -746,8 +759,34 @@ export function UserPortal() {
     });
 
     setActiveSection("request-start");
+    setIsComposerOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const applyCategoryDraft = useCallback(
+    (categoryId: Category) => {
+      const newDraft = createEmptyDraft(categoryId, "?곗뒪?ы넲");
+      newDraft.academy = draft.academy;
+      newDraft.requestedDate = draft.requestedDate;
+      newDraft.urgency = draft.urgency;
+
+      if (categoryId === "equipment") {
+        newDraft.requestItem = "?곗뒪?ы넲";
+        setSelectedPartCategory("PC");
+        setSelectedSubCategory("CPU");
+      } else {
+        setSelectedPartCategory(null);
+        setSelectedSubCategory(null);
+      }
+
+      if (categoryId === "as") {
+        setAsStep("searching");
+      }
+
+      setDraft(newDraft);
+    },
+    [draft.academy, draft.requestedDate, draft.urgency]
+  );
 
   const selected = categories.find((item) => item.id === draft.category) ?? categories[0];
   const SelectedIcon = selected.icon;
@@ -964,6 +1003,7 @@ export function UserPortal() {
 
     await loadHistory();
     setActiveSection("request-status");
+    setIsComposerOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
     setDraft(createEmptyDraft("equipment", "데스크톱"));
     setPartsBasket([]);
@@ -1165,8 +1205,20 @@ export function UserPortal() {
 
           {activeSection === "request-start" ? (
             <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
-              <p className="mt-1 text-sm text-gray-500">카테고리를 고르고 요청 내용을 적으면 운영팀으로 전달됩니다.</p>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">무엇을 도와드릴까요?</h2>
+                  <p className="mt-1 text-sm text-gray-500">카테고리를 고른 뒤 `접수하기` 버튼으로 작성 패널을 열어 요청을 등록할 수 있습니다.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsComposerOpen(true)}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  접수하기
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
               <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
                 {categories.map((item) => {
                   const Icon = item.icon;
@@ -1174,24 +1226,7 @@ export function UserPortal() {
                   return (
                     <button
                       key={item.id}
-                      onClick={() => {
-                        const newDraft = createEmptyDraft(item.id, "데스크톱");
-                        newDraft.academy = draft.academy;
-                        newDraft.requestedDate = draft.requestedDate;
-                        newDraft.urgency = draft.urgency;
-                        if (item.id === "equipment") {
-                          newDraft.requestItem = "데스크톱";
-                          setSelectedPartCategory("PC");
-                          setSelectedSubCategory("CPU");
-                        } else {
-                          setSelectedPartCategory(null);
-                          setSelectedSubCategory(null);
-                        }
-                        if (item.id === "as") {
-                          setAsStep("searching");
-                        }
-                        setDraft(newDraft);
-                      }}
+                      onClick={() => applyCategoryDraft(item.id)}
                       className={`rounded-lg border px-4 py-3 text-left transition ${active ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
                     >
                       <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.tone}`}>
@@ -1202,6 +1237,11 @@ export function UserPortal() {
                     </button>
                   );
                 })}
+              </div>
+              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                현재 선택: <span className="font-black">{selected.title}</span>
+                <span className="mx-2 text-blue-300">|</span>
+                {draft.resubmitId ? "보류된 요청을 수정해서 다시 접수하는 상태입니다." : "선택한 카테고리를 기준으로 접수 패널이 열립니다."}
               </div>
             </div>
           ) : null}
@@ -1304,8 +1344,30 @@ export function UserPortal() {
           </section>
           ) : null}
 
-          {activeSection === "request-start" ? (
-          <section className="rounded-lg border border-gray-200 bg-white p-5">
+          {activeSection === "request-start" && isComposerOpen ? (
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+            onClick={() => setIsComposerOpen(false)}
+          >
+          <section
+            className="max-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-y-auto rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_30px_120px_rgba(15,23,42,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Request Composer</p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">{draft.resubmitId ? "요청 재접수" : "새 요청 접수"}</h2>
+                <p className="mt-1 text-sm text-slate-500">긴 입력폼은 별도 패널에서 작성하고, 완료 후 바로 접수 현황으로 이동합니다.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsComposerOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                aria-label="close request composer"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
             <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-slate-50 p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -1974,14 +2036,9 @@ export function UserPortal() {
                 {draft.resubmitId ? "수정하여 재접수" : "요청 접수"}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
-              <button
-                onClick={() => setDraft(createEmptyDraft("equipment", "데스크톱"))}
-                className="text-center text-sm font-semibold text-gray-500 hover:text-gray-800"
-              >
-                취소하고 새로 작성하기
-              </button>
             </div>
           </section>
+          </div>
           ) : null}
 
           {activeSection === "request-workflow" ? (
@@ -2085,6 +2142,7 @@ export function UserPortal() {
                       onClick={() => {
                         setDraft((current) => ({ ...current, title: sample }));
                         changeSection("request-start");
+                        setIsComposerOpen(true);
                       }}
                       className="rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:border-blue-200 hover:bg-blue-50"
                     >

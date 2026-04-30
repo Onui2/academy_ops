@@ -1,79 +1,91 @@
 import { NextResponse } from "next/server";
-import { createPortalRequest, fetchPortalRequests } from "@/lib/portal-request-service";
+import { isHarnessError } from "@/lib/harness/harness-error";
+import { runAuditHarness } from "@/lib/harness/audit/audit-harness";
+import { runSecurityHarness } from "@/lib/harness/security/security-harness";
 import { createServiceSupabaseClient } from "@/lib/server-supabase";
-import { readTeacherSessionFromCookieHeader } from "@/lib/teacher-session";
-import type { WorkItem } from "@/types/ops";
+import { createRequestWithHarness, listRequestsForActor } from "@/lib/services/request-hub-service";
+import type { RequestCreatePayload } from "@/types/request";
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
+function errorResponse(error: unknown, fallback: string) {
+  if (isHarnessError(error)) {
+    return NextResponse.json({ message: error.exposeMessage }, { status: error.status });
   }
-  return fallback;
+
+  console.error("[portal-requests]", error);
+  return NextResponse.json({ message: fallback }, { status: 500 });
 }
 
 export async function GET(request: Request) {
-  const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
-  if (!session) {
-    return NextResponse.json({ message: "teacher 세션이 없습니다." }, { status: 401 });
-  }
-
-  const supabase = createServiceSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ message: "서버 Supabase 설정이 누락되었습니다." }, { status: 503 });
-  }
+  let actor: ReturnType<typeof runSecurityHarness>["actor"] | null = null;
+  let auditContext: ReturnType<typeof runSecurityHarness>["auditContext"] | null = null;
 
   try {
-    const items = await fetchPortalRequests(supabase, session);
+    const security = runSecurityHarness(request);
+    actor = security.actor;
+    auditContext = security.auditContext;
+
+    const supabase = createServiceSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ message: "서버 설정이 완료되지 않았습니다." }, { status: 503 });
+    }
+
+    const items = await listRequestsForActor(supabase, actor);
     return NextResponse.json({ items });
   } catch (error) {
-    return NextResponse.json(
-      { message: getErrorMessage(error, "요청 목록을 불러오지 못했습니다.") },
-      { status: 500 }
-    );
+    if (actor && auditContext) {
+      const supabase = createServiceSupabaseClient();
+      if (supabase && isHarnessError(error) && error.status === 403) {
+        await runAuditHarness(supabase, {
+          actorUserId: actor.actorUserId,
+          actorName: actor.actorName,
+          actionType: "REQUEST_ACCESS_DENIED",
+          targetType: "request",
+          targetId: "request-list",
+          ipAddress: auditContext.ipAddress,
+          userAgent: auditContext.userAgent,
+          summary: "요청 목록 접근이 거부되었습니다."
+        }).catch(() => undefined);
+      }
+    }
+
+    return errorResponse(error, "요청 목록을 불러오지 못했습니다.");
   }
 }
 
 export async function POST(request: Request) {
-  const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
-  if (!session) {
-    return NextResponse.json({ message: "teacher 세션이 없습니다." }, { status: 401 });
-  }
-
-  const supabase = createServiceSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ message: "서버 Supabase 설정이 누락되었습니다." }, { status: 503 });
-  }
-
-  let body: {
-    item?: WorkItem;
-    nasPermission?: {
-      user_email: string;
-      resource_name: string;
-      permission_level: string;
-    };
-  } = {};
+  let actor: ReturnType<typeof runSecurityHarness<RequestCreatePayload>>["actor"] | null = null;
+  let auditContext: ReturnType<typeof runSecurityHarness<RequestCreatePayload>>["auditContext"] | null = null;
 
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ message: "요청 형식이 올바르지 않습니다." }, { status: 400 });
-  }
+    const rawBody = (await request.json()) as RequestCreatePayload;
+    const security = runSecurityHarness(request, rawBody);
+    actor = security.actor;
+    auditContext = security.auditContext;
 
-  if (!body.item) {
-    return NextResponse.json({ message: "저장할 요청 데이터가 없습니다." }, { status: 400 });
-  }
+    const supabase = createServiceSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ message: "서버 설정이 완료되지 않았습니다." }, { status: 503 });
+    }
 
-  try {
-    await createPortalRequest(supabase, session, body.item, {
-      nasPermission: body.nasPermission
-    });
-    return NextResponse.json({ ok: true });
+    const created = await createRequestWithHarness(supabase, actor, security.payload ?? rawBody, auditContext);
+    return NextResponse.json({ ok: true, requestNo: created.requestNo });
   } catch (error) {
-    return NextResponse.json(
-      { message: getErrorMessage(error, "요청 저장에 실패했습니다.") },
-      { status: 500 }
-    );
+    if (actor && auditContext) {
+      const supabase = createServiceSupabaseClient();
+      if (supabase && isHarnessError(error) && error.status === 422) {
+        await runAuditHarness(supabase, {
+          actorUserId: actor.actorUserId,
+          actorName: actor.actorName,
+          actionType: "POLICY_VIOLATION",
+          targetType: "policy",
+          targetId: "request-create",
+          ipAddress: auditContext.ipAddress,
+          userAgent: auditContext.userAgent,
+          summary: "정책 위반으로 요청 생성이 차단되었습니다."
+        }).catch(() => undefined);
+      }
+    }
+
+    return errorResponse(error, "요청을 저장하지 못했습니다.");
   }
 }
