@@ -39,6 +39,7 @@ import {
   workItems as seedItems 
 } from "@/lib/ops-data";
 import { diagnosisPatterns } from "@/lib/diagnosis-data";
+import { resolveLegacyRoleFromProfile } from "@/lib/harness/security/role-guard";
 import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
 import { createClient } from "@/lib/supabase";
 import { useLivePartPrices } from "@/lib/use-live-part-prices";
@@ -122,6 +123,12 @@ type NasPermissionRecord = {
   permission_level: string;
   status: string;
   created_at: string;
+};
+type DashboardMetrics = {
+  todaySubmittedCount: number;
+  inProgressCount: number;
+  approvalPendingCount: number;
+  overdueCount: number;
 };
 type FaqCategory = {
   id: string;
@@ -439,11 +446,32 @@ function isAdminRole(role: UserRole) {
   return role === "academy_admin" || role === "super_admin" || role === "nas_admin" || role === "executive";
 }
 
+function resolveTeacherSessionRole(session: TeacherSession) {
+  return resolveLegacyRoleFromProfile(session.profile, session.portalRole) ?? (session.portalRole === "admin" ? "super_admin" : "general");
+}
+
+function getVisibleMenuKeysForRole(role: UserRole): MenuKey[] {
+  if (role === "super_admin") {
+    return ["dashboard", "queue", "tablet", "as", "nas", "audit"];
+  }
+
+  if (role === "executive" || role === "academy_admin") {
+    return ["dashboard", "queue", "tablet", "as", "nas"];
+  }
+
+  if (role === "nas_admin") {
+    return ["dashboard", "queue", "nas"];
+  }
+
+  return ["dashboard", "queue"];
+}
+
 export function OpsConsole() {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
   const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(null);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [syncState, setSyncState] = useState("데이터 연동 중");
   const [activeMenu, setActiveMenu] = useState<MenuKey>("dashboard");
@@ -703,7 +731,7 @@ export function OpsConsole() {
       setItems(mergedItems.length ? mergedItems : seedItems);
       setAudit(localState.audit.length ? localState.audit : initialAudit);
       setSelectedId(mergedItems[0]?.id ?? seedItems[0]?.id ?? "");
-      setRole(teacherSession.portalRole === "admin" ? "super_admin" : "general");
+      setRole(resolveTeacherSessionRole(teacherSession));
       setSyncState("Teacher 세션 서버 동기화");
     } catch (error) {
       setSyncState(error instanceof Error ? error.message : "teacher 요청 동기화 실패");
@@ -768,13 +796,53 @@ export function OpsConsole() {
   const pendingCount = items.filter((item) => item.status !== "완료").length;
   const approvalCount = items.filter((item) => item.status === "승인 대기").length;
   const riskCount = items.filter((item) => item.priority === "긴급" || item.status === "보류").length;
+  const overdueCount = dashboardMetrics?.overdueCount ?? 0;
   const visibleSyncState = getVisibleSyncState(syncState);
-  const visibleMenuItems = menuItems.filter(
-    (item) => item.key !== "equipment" && item.key !== "parts" && (item.key !== "audit" || isAdminRole(role))
-  );
+  const visibleMenuItems = menuItems.filter((item) => getVisibleMenuKeysForRole(role).includes(item.key));
 
   useEffect(() => {
-    if (activeMenu === "audit" && !isAdminRole(role)) {
+    if (!teacherSession || user || !isAdminRole(role)) {
+      setDashboardMetrics(null);
+      return;
+    }
+
+    let active = true;
+
+    const loadDashboardMetrics = async () => {
+      try {
+        const response = await fetch("/api/dashboard/metrics", {
+          method: "GET",
+          cache: "no-store"
+        });
+        const data = (await response.json()) as DashboardMetrics & { message?: string };
+        if (!response.ok) {
+          throw new Error(data.message ?? "대시보드 지표를 불러오지 못했습니다.");
+        }
+
+        if (active) {
+          setDashboardMetrics({
+            todaySubmittedCount: data.todaySubmittedCount,
+            inProgressCount: data.inProgressCount,
+            approvalPendingCount: data.approvalPendingCount,
+            overdueCount: data.overdueCount
+          });
+        }
+      } catch {
+        if (active) {
+          setDashboardMetrics(null);
+        }
+      }
+    };
+
+    void loadDashboardMetrics();
+
+    return () => {
+      active = false;
+    };
+  }, [teacherSession, user, role, items.length]);
+
+  useEffect(() => {
+    if (!getVisibleMenuKeysForRole(role).includes(activeMenu)) {
       setActiveMenu("dashboard");
     }
   }, [activeMenu, role]);
@@ -1314,7 +1382,7 @@ export function OpsConsole() {
 
         <div className="min-w-0">
           <>
-            {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
+            {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} overdueCount={overdueCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
             {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
             {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} setActiveMenu={setActiveMenu} /> : null}
             {activeMenu === "parts" ? (
@@ -1396,12 +1464,13 @@ function Screen({ title, desc, children }: { title: string; desc: string; childr
   );
 }
 
-function Dashboard(props: { pendingCount: number; approvalCount: number; riskCount: number; auditCount: number; setActiveMenu: (menu: MenuKey) => void }) {
+function Dashboard(props: { pendingCount: number; approvalCount: number; riskCount: number; overdueCount: number; auditCount: number; setActiveMenu: (menu: MenuKey) => void }) {
   return (
     <Screen title="대시보드" desc="오늘 처리할 운영 업무를 요약합니다.">
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="진행 업무" value={props.pendingCount.toString()} icon={ClipboardList} />
         <Metric label="승인 대기" value={props.approvalCount.toString()} icon={ShieldCheck} />
+        <Metric label="SLA 초과" value={props.overdueCount.toString()} icon={AlertTriangle} />
         <Metric label="위험 신호" value={props.riskCount.toString()} icon={AlertTriangle} />
         <Metric label="감사 로그" value={props.auditCount.toString()} icon={Activity} />
       </section>
@@ -1589,6 +1658,8 @@ function QueueTable(props: {
   openDetail: (id: string) => void;
   openCreate: () => void;
 }) {
+  const router = useRouter();
+
   return (
     <section className="surface-strong min-w-0 overflow-hidden rounded-lg">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3">
@@ -1622,7 +1693,12 @@ function QueueTable(props: {
               props.items.map((item) => (
                 <tr key={item.id} className="border-t border-border hover:bg-blue-50/40 transition-colors">
                   <td className="px-4 py-3">
-                    <button onClick={() => props.openDetail(item.id)} className="text-left font-bold hover:text-blue-700 transition-colors">{item.title}</button>
+                    <button
+                      onClick={() => router.push(`/ops/requests/${encodeURIComponent(item.id)}`)}
+                      className="text-left font-bold hover:text-blue-700 transition-colors"
+                    >
+                      {item.title}
+                    </button>
                     <div className="mt-1 text-xs font-medium text-muted-foreground">{item.module} · {item.requester} · {item.priority} · {item.due}</div>
                   </td>
                   <td className="px-4 py-3"><StatusPill status={item.status} /></td>
@@ -1645,7 +1721,11 @@ function QueueTable(props: {
           <div className="p-8 text-center text-slate-400 text-sm">요청이 없습니다.</div>
         ) : (
           props.items.map((item) => (
-            <div key={item.id} className="p-4 active:bg-slate-50 transition-colors" onClick={() => props.openDetail(item.id)}>
+            <div
+              key={item.id}
+              className="p-4 active:bg-slate-50 transition-colors"
+              onClick={() => router.push(`/ops/requests/${encodeURIComponent(item.id)}`)}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-bold text-slate-900 leading-tight truncate">{item.title}</div>

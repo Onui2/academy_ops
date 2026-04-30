@@ -891,6 +891,23 @@ export function UserPortal() {
     ].filter(Boolean).join("\n");
 
     const amount = (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기") ? `${partsBasket.length}종 / ${basketTotal.toLocaleString()}원` : undefined;
+    const requestMetadata = {
+      category: draft.category,
+      requestItem: draft.requestItem,
+      quantity: draft.quantity,
+      requestedDate: draft.requestedDate,
+      userEmail: draft.userEmail,
+      folderName: draft.folderName,
+      permissionLevel: draft.permissionLevel,
+      rentalEndDate: draft.usageDuration,
+      userName: profileName,
+      issueMessage: draft.issueMessage,
+      currentModel: draft.currentModel,
+      location: draft.location,
+      detail: draft.detail,
+      urgentReason: draft.urgentReason,
+      urgentImpact: draft.urgentImpact
+    };
 
     if (draft.resubmitId) {
       try {
@@ -975,6 +992,8 @@ export function UserPortal() {
             },
             body: JSON.stringify({
               item,
+              category: draft.category,
+              metadata: requestMetadata,
               nasPermission:
                 draft.category === "nas"
                   ? {
@@ -1324,14 +1343,24 @@ export function UserPortal() {
                         <span>우선순위: {normalizePriority(item.priority)}</span>
                       </div>
 
-                      {isRejected ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
-                          onClick={() => loadForResubmit(item)}
-                          className="mt-3 inline-flex h-8 items-center justify-center rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-700"
+                          type="button"
+                          onClick={() => router.push(`/user/requests/${encodeURIComponent(item.id)}`)}
+                          className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50"
                         >
-                          내용 불러와서 다시 접수
+                          상세 보기
                         </button>
-                      ) : null}
+                        {isRejected ? (
+                          <button
+                            type="button"
+                            onClick={() => loadForResubmit(item)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-700"
+                          >
+                            내용 불러와서 다시 접수
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}

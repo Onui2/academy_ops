@@ -74,3 +74,12 @@ export type RequestCommentCreatePayload = {
   comment: string;
   visibility?: RequestVisibility;
 };
+
+export type RequestStatusUpdatePayload = {
+  workflowStatus: RequestWorkflowStatus;
+  note?: string;
+  rejectionNote?: string;
+  approvalNote?: string;
+  assignedUserId?: string | null;
+  assignedUserName?: string | null;
+};

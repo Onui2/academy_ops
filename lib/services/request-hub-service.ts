@@ -15,7 +15,14 @@ import {
   stripPortalMeta
 } from "@/lib/portal-request-service";
 import type { AuthenticatedActor } from "@/types/user-role";
-import type { RequestComment, RequestCommentCreatePayload, RequestCreatePayload, RequestDetail, RequestPriorityCode } from "@/types/request";
+import type {
+  RequestComment,
+  RequestCommentCreatePayload,
+  RequestCreatePayload,
+  RequestDetail,
+  RequestPriorityCode,
+  RequestStatusUpdatePayload
+} from "@/types/request";
 import type { RequestWorkflowStatus } from "@/types/workflow";
 import type { WorkItem } from "@/types/ops";
 
@@ -60,6 +67,8 @@ type RequestRow = {
 };
 
 type ApprovalRow = {
+  id?: string;
+  step_order?: number;
   decision: "pending" | "approved" | "rejected";
 };
 
@@ -279,6 +288,90 @@ async function resolveApprovalState(supabase: SupabaseClient, requestId: string)
   return "PENDING";
 }
 
+async function listApprovalRowsByRequestId(supabase: SupabaseClient, requestId: string) {
+  const { data, error } = await supabase
+    .from("approvals")
+    .select("id, step_order, decision, approver_role")
+    .eq("request_id", requestId)
+    .order("step_order", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as Array<ApprovalRow & { approver_role?: string }>;
+}
+
+async function applyApprovalDecisionForActor(
+  supabase: SupabaseClient,
+  requestId: string,
+  actor: AuthenticatedActor,
+  decision: "approved" | "rejected",
+  note: string | null | undefined
+) {
+  if (!actor.legacyRole) {
+    throw new HarnessError("Approval decision requires a mapped legacy role.", 403, "승인 권한이 없습니다.");
+  }
+
+  const { data, error } = await supabase
+    .from("approvals")
+    .select("id, step_order, decision")
+    .eq("request_id", requestId)
+    .eq("approver_role", actor.legacyRole)
+    .eq("decision", "pending")
+    .order("step_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.id) {
+    throw new HarnessError("No pending approval step was found for this actor.", 403, "현재 승인할 수 있는 단계가 없습니다.");
+  }
+
+  const { error: updateError } = await supabase
+    .from("approvals")
+    .update({
+      decision,
+      note: note?.trim() || null,
+      decided_at: new Date().toISOString()
+    })
+    .eq("id", data.id);
+
+  if (updateError) throw updateError;
+
+  return listApprovalRowsByRequestId(supabase, requestId);
+}
+
+function canActorListRow(actor: AuthenticatedActor, row: RequestRow) {
+  if (actor.appRole === "ADMIN") {
+    return true;
+  }
+
+  if (actor.appRole === "MANAGER") {
+    return row.branch_id === actor.branchId || row.assigned_user_id === actor.actorUserId;
+  }
+
+  if (actor.appRole === "STAFF") {
+    return row.assigned_user_id === actor.actorUserId;
+  }
+
+  return canTeacherSessionAccessRow(
+    {
+      request_no: row.request_no,
+      description: row.description,
+      branch_id: row.branch_id
+    } as RequestRow,
+    {
+      username: actor.username ?? "",
+      brand: actor.brandId ?? "",
+      brandName: actor.brandName,
+      branch: actor.branchId ?? "",
+      branchName: actor.branchName,
+      portalRole: actor.portalRole ?? "user",
+      type: "STAFF",
+      authenticatedAt: "",
+      profile: null
+    }
+  );
+}
+
 export async function listRequestsForActor(supabase: SupabaseClient, actor: AuthenticatedActor) {
   ensurePermission(actor, "request:list");
 
@@ -289,27 +382,7 @@ export async function listRequestsForActor(supabase: SupabaseClient, actor: Auth
 
   if (error) throw error;
 
-  const rows = ((data ?? []) as RequestRow[]).filter((row) => {
-    if (actor.isAdmin) return true;
-    return canTeacherSessionAccessRow(
-      {
-        request_no: row.request_no,
-        description: row.description,
-        branch_id: row.branch_id
-      } as RequestRow,
-      {
-        username: actor.username ?? "",
-        brand: actor.brandId ?? "",
-        brandName: actor.brandName,
-        branch: actor.branchId ?? "",
-        branchName: actor.branchName,
-        portalRole: actor.portalRole ?? "user",
-        type: "STAFF",
-        authenticatedAt: "",
-        profile: null
-      }
-    );
-  });
+  const rows = ((data ?? []) as RequestRow[]).filter((row) => canActorListRow(actor, row));
 
   return rows.map(withExtendedWorkItem);
 }
@@ -353,7 +426,10 @@ export async function createRequestWithHarness(
     urgent_impact: payload.item.urgentImpact ?? null,
     evidence_files: payload.item.evidenceFiles ?? [],
     request_category: category,
-    sub_category: typeof metadata.requestItem === "string" ? metadata.requestItem : null,
+    sub_category:
+      typeof (metadata as Record<string, unknown>).requestItem === "string"
+        ? ((metadata as Record<string, unknown>).requestItem as string)
+        : null,
     requester_name: actor.actorName,
     branch_id: actor.branchId,
     branch_name: actor.branchName,
@@ -674,6 +750,118 @@ export async function deleteRequestForActor(supabase: SupabaseClient, actor: Aut
     requestId: row.id,
     summary: `${requestNo} 요청이 취소되었습니다.`
   });
+}
+
+export async function updateRequestWorkflowStatusForActor(
+  supabase: SupabaseClient,
+  actor: AuthenticatedActor,
+  requestNo: string,
+  payload: RequestStatusUpdatePayload,
+  auditContext: AuditContext
+) {
+  const row = await fetchRequestRowByNo(supabase, requestNo);
+  if (!row) {
+    throw new HarnessError("Request not found.", 404, "요청을 찾을 수 없습니다.");
+  }
+
+  const subject = buildPermissionSubject(row);
+  ensurePermission(actor, "request:status:update", subject, "요청 상태를 변경할 권한이 없습니다.");
+
+  const currentWorkflowStatus = resolveWorkflowStatus(row.workflow_status, normalizeLegacyStatus(dbRowToWorkItem(row).status));
+  let nextWorkflowStatus = payload.workflowStatus;
+  let effectiveWorkflowStatus = nextWorkflowStatus;
+
+  if (nextWorkflowStatus === "REJECTED" && !String(payload.rejectionNote ?? "").trim()) {
+    throw new HarnessError("Rejected requests require a rejection note.", 422, "반려 사유를 입력해 주세요.");
+  }
+
+  if (nextWorkflowStatus === "COMPLETED" && !String(payload.note ?? "").trim()) {
+    throw new HarnessError("Completed requests require a resolution note.", 422, "처리 결과를 입력해 주세요.");
+  }
+
+  let approvalRows: Array<ApprovalRow & { approver_role?: string }> | null = null;
+  if (currentWorkflowStatus === "APPROVAL_PENDING" && (nextWorkflowStatus === "APPROVED" || nextWorkflowStatus === "REJECTED")) {
+    approvalRows = await applyApprovalDecisionForActor(
+      supabase,
+      row.id,
+      actor,
+      nextWorkflowStatus === "APPROVED" ? "approved" : "rejected",
+      nextWorkflowStatus === "APPROVED" ? payload.approvalNote : payload.rejectionNote
+    );
+
+    if (nextWorkflowStatus === "APPROVED") {
+      effectiveWorkflowStatus = approvalRows.every((entry) => entry.decision === "approved") ? "APPROVED" : "APPROVAL_PENDING";
+    } else {
+      effectiveWorkflowStatus = "REJECTED";
+    }
+  }
+
+  if (currentWorkflowStatus !== effectiveWorkflowStatus) {
+    runWorkflowHarness(currentWorkflowStatus, effectiveWorkflowStatus);
+  }
+
+  const changedAt = new Date().toISOString();
+  const slaState = applySlaPauseState({
+    currentStatus: currentWorkflowStatus,
+    nextStatus: effectiveWorkflowStatus,
+    dueAt: row.sla_due_at,
+    pausedAt: row.sla_paused_at,
+    changedAt
+  });
+  const nextLegacyStatus = resolveLegacyStatusFromWorkflowStatus(effectiveWorkflowStatus);
+
+  const updatedFields = {
+    status: legacyToDbStatus[nextLegacyStatus],
+    workflow_status: effectiveWorkflowStatus,
+    audit_note: payload.note?.trim() || row.audit_note,
+    rejection_note: effectiveWorkflowStatus === "REJECTED" ? payload.rejectionNote?.trim() || row.rejection_note : row.rejection_note,
+    approval_note: payload.approvalNote?.trim() || row.approval_note,
+    assigned_user_id: payload.assignedUserId ?? row.assigned_user_id,
+    assigned_user_name: payload.assignedUserName ?? row.assigned_user_name,
+    sla_due_at: slaState.dueAt,
+    sla_paused_at: slaState.pausedAt,
+    completed_at: effectiveWorkflowStatus === "COMPLETED" ? changedAt : row.completed_at
+  };
+
+  const { error } = await supabase.from("ops_requests").update(updatedFields).eq("request_no", requestNo);
+  if (error) throw error;
+
+  await runAuditHarness(supabase, {
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actionType: currentWorkflowStatus === effectiveWorkflowStatus ? "REQUEST_UPDATED" : "REQUEST_STATUS_CHANGED",
+    targetType: "request",
+    targetId: requestNo,
+    beforeValue: {
+      status: resolveLegacyStatusFromWorkflowStatus(currentWorkflowStatus),
+      workflowStatus: currentWorkflowStatus,
+      assignedUserId: row.assigned_user_id,
+      assignedUserName: row.assigned_user_name
+    },
+    afterValue: {
+      status: nextLegacyStatus,
+      workflowStatus: effectiveWorkflowStatus,
+      assignedUserId: updatedFields.assigned_user_id,
+      assignedUserName: updatedFields.assigned_user_name,
+      approvalState:
+        approvalRows && nextWorkflowStatus === "APPROVED"
+          ? approvalRows.every((entry) => entry.decision === "approved")
+            ? "APPROVED"
+            : "PENDING"
+          : nextWorkflowStatus === "REJECTED"
+            ? "REJECTED"
+            : undefined
+    },
+    ipAddress: auditContext.ipAddress,
+    userAgent: auditContext.userAgent,
+    requestId: row.id,
+    summary:
+      currentWorkflowStatus === effectiveWorkflowStatus
+        ? `${requestNo} 요청의 승인 단계가 기록되었습니다.`
+        : `${requestNo} 요청 상태가 ${nextLegacyStatus}(으)로 변경되었습니다.`
+  });
+
+  return getRequestDetailForActor(supabase, actor, requestNo);
 }
 
 export async function getDashboardMetricsForActor(supabase: SupabaseClient, actor: AuthenticatedActor, auditContext: AuditContext) {
