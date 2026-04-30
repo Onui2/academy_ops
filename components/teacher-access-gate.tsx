@@ -85,6 +85,18 @@ function writeStoredHint(hint: LoginHintState) {
   window.localStorage.setItem(storageKey, JSON.stringify(hint));
 }
 
+function clearStoredBranch() {
+  const current = readStoredHint();
+  if (!current.branch) return current;
+
+  const next = {
+    ...current,
+    branch: ""
+  };
+  writeStoredHint(next);
+  return next;
+}
+
 function routeForRole(role: PortalRole) {
   return role === "admin" ? "/ops" : "/user";
 }
@@ -373,12 +385,12 @@ export function TeacherAccessGate({
   }, []);
 
   useEffect(() => {
-    const stored = readStoredHint();
+    const stored = clearStoredBranch();
     setAcademyQuery(stored.academyName);
     setForm({
       username: stored.username,
       password: "",
-      branch: stored.branch
+      branch: ""
     });
 
     if (!stored.brand || !stored.academyName || !stored.sysSeq) {
@@ -392,7 +404,7 @@ export function TeacherAccessGate({
       sysSeq: stored.sysSeq
     };
 
-    void loadBranches(academy, stored.branch);
+    void loadBranches(academy);
   }, []);
 
   useEffect(() => {
