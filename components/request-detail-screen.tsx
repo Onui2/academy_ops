@@ -3,7 +3,9 @@
 import { ArrowLeft, Loader2, MessageSquarePlus, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { workItems as seedItems } from "@/lib/ops-data";
 import { StatusPill } from "@/components/status-pill";
+import type { WorkItem } from "@/types/ops";
 import type { RequestComment, RequestDetail } from "@/types/request";
 
 function formatDateTime(value: string | null | undefined) {
@@ -27,10 +29,82 @@ export function RequestDetailScreen({
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<RequestDetail | null>(null);
+  const [isLocalFallback, setIsLocalFallback] = useState(false);
   const [comment, setComment] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  function resolveWorkflowStatusFromItem(item: WorkItem): RequestDetail["workflowStatus"] {
+    if (item.status === "완료") return "COMPLETED";
+    if (item.status === "승인 대기") return "APPROVAL_PENDING";
+    if (item.status === "검토") return "TRIAGED";
+    if (item.status === "보류") return "REJECTED";
+    if (item.status === "진행") return "IN_PROGRESS";
+    return "SUBMITTED";
+  }
+
+  function buildLocalFallback(requestItem: WorkItem): RequestDetail {
+    const now = new Date().toISOString();
+
+    return {
+      requestNo: requestItem.id,
+      workflowStatus: resolveWorkflowStatusFromItem(requestItem),
+      category: requestItem.module === "A/S" ? "as" : requestItem.module === "NAS" ? "nas" : requestItem.module === "태블릿 렌탈" ? "tablet" : "other",
+      subCategory: null,
+      priorityCode:
+        requestItem.priority === "긴급" ? "URGENT" : requestItem.priority === "높음" ? "HIGH" : requestItem.priority === "낮음" ? "LOW" : "NORMAL",
+      requesterName: requestItem.requester,
+      requesterUserId: null,
+      branchId: null,
+      branchName: null,
+      assignedDepartment: null,
+      assignedUserId: null,
+      assignedUserName: requestItem.owner,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: requestItem.status === "완료" ? now : null,
+      approvalState: requestItem.status === "승인 대기" ? "PENDING" : "NOT_REQUIRED",
+      metadata: {
+        localOnly: true
+      },
+      workItem: requestItem,
+      sla: {
+        dueAt: null,
+        pausedAt: null,
+        breached: false,
+        remainingMinutes: null,
+        displayLabel: "로컬 요청"
+      },
+      comments: [],
+      progressLogs: [],
+      attachments: (requestItem.evidenceFiles ?? []).map((fileName, index) => ({
+        id: `${requestItem.id}-local-attachment-${index + 1}`,
+        fileName,
+        fileUrl: "",
+        fileSize: 0,
+        mimeType: "",
+        uploadedBy: requestItem.requester,
+        createdAt: now
+      }))
+    };
+  }
+
+  function findLocalFallback(requestNo: string) {
+    if (typeof window === "undefined") return null;
+
+    try {
+      const raw = window.localStorage.getItem("academy-ops-hub-state-v2");
+      const parsed = raw ? (JSON.parse(raw) as { items?: WorkItem[] }) : null;
+      const localItem = parsed?.items?.find((item) => item.id === requestNo);
+      if (localItem) return buildLocalFallback(localItem);
+    } catch {
+      // Ignore malformed local cache and continue to seed fallback.
+    }
+
+    const seedItem = seedItems.find((item) => item.id === requestNo);
+    return seedItem ? buildLocalFallback(seedItem) : null;
+  }
 
   useEffect(() => {
     let active = true;
@@ -47,12 +121,29 @@ export function RequestDetailScreen({
 
         const data = (await response.json()) as { item?: RequestDetail; message?: string };
         if (!response.ok || !data.item) {
+          const localFallback = findLocalFallback(requestNo);
+          if (localFallback) {
+            if (!active) return;
+            setDetail(localFallback);
+            setIsLocalFallback(true);
+            return;
+          }
+
           throw new Error(data.message ?? "요청 상세를 불러오지 못했습니다.");
         }
 
         if (!active) return;
         setDetail(data.item);
+        setIsLocalFallback(false);
       } catch (error) {
+        const localFallback = findLocalFallback(requestNo);
+        if (localFallback) {
+          if (!active) return;
+          setDetail(localFallback);
+          setIsLocalFallback(true);
+          return;
+        }
+
         if (!active) return;
         setErrorMessage(error instanceof Error ? error.message : "요청 상세를 불러오지 못했습니다.");
       } finally {
@@ -69,6 +160,11 @@ export function RequestDetailScreen({
   const visibleComments = useMemo(() => detail?.comments ?? [], [detail]);
 
   async function submitComment() {
+    if (isLocalFallback) {
+      setErrorMessage("로컬 요청은 서버 동기화 후 댓글을 등록할 수 있습니다.");
+      return;
+    }
+
     if (!comment.trim()) {
       setErrorMessage("댓글 내용을 입력해 주세요.");
       return;
@@ -199,6 +295,11 @@ export function RequestDetailScreen({
                   <MessageSquarePlus className="h-4 w-4 text-blue-600" aria-hidden="true" />
                   <h2 className="text-lg font-black text-slate-900">댓글</h2>
                 </div>
+                {isLocalFallback ? (
+                  <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                    아직 DB에 동기화되지 않은 요청이라 댓글과 감사 로그는 읽기 전용으로 표시됩니다.
+                  </p>
+                ) : null}
                 <div className="mt-4 grid gap-3">
                   {visibleComments.length ? (
                     visibleComments.map((entry) => (
@@ -228,7 +329,7 @@ export function RequestDetailScreen({
                     <button
                       type="button"
                       onClick={() => void submitComment()}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isLocalFallback}
                       className="inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
                       {isSubmitting ? "저장 중..." : "댓글 등록"}
