@@ -29,7 +29,7 @@ export function resolveLegacyRoleFromProfile(
   if (raw === "academy_admin" || raw === "branch_admin" || raw === "admin" || raw === "administrator") {
     return "academy_admin";
   }
-  if (raw === "nas_admin" || raw === "staff" || raw === "operator" || raw === "support") {
+  if (raw === "nas_admin") {
     return "nas_admin";
   }
 

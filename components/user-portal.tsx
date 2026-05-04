@@ -32,7 +32,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { createNasPermissionRequest, fetchFaqs, fetchRequests, updateRequestStatus } from "@/lib/ops-repository";
+import { fetchFaqs } from "@/lib/ops-repository";
 import { diagnosisPatterns, getDiagnosis } from "@/lib/diagnosis-data";
 import { equipmentParts, equipmentPresets, partsCategories } from "@/lib/ops-data";
 import { buildDanawaSearchUrl, buildGmarketSearchUrl, resolveDanawaQuery, resolveGmarketQuery } from "@/lib/part-price-catalog";
@@ -157,6 +157,59 @@ function readAdminQueueFromStorage() {
   } catch {
     window.localStorage.removeItem(adminStorageKey);
     return { items: [] as WorkItem[] };
+  }
+}
+
+async function fetchPortalRequestHistory() {
+  const response = await fetch("/api/portal/requests", {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  const data = (await response.json()) as { items?: WorkItem[]; message?: string };
+  if (!response.ok) {
+    throw new Error(data.message ?? "요청 목록을 불러오지 못했습니다.");
+  }
+
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function patchPortalRequest(requestNo: string, item: WorkItem) {
+  const response = await fetch(`/api/portal/requests/${encodeURIComponent(requestNo)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ item })
+  });
+
+  const data = (await response.json()) as { message?: string };
+  if (!response.ok) {
+    throw new Error(data.message ?? "요청 수정에 실패했습니다.");
+  }
+}
+
+async function createPortalRequestEntry(payload: {
+  item: WorkItem;
+  category: Category;
+  metadata: Record<string, unknown>;
+  nasPermission?: {
+    user_email: string;
+    resource_name: string;
+    permission_level: string;
+  };
+}) {
+  const response = await fetch("/api/portal/requests", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = (await response.json()) as { message?: string };
+  if (!response.ok) {
+    throw new Error(data.message ?? "요청 접수에 실패했습니다.");
   }
 }
 
@@ -396,9 +449,9 @@ export function UserPortal() {
   }, []);
 
   const loadHistory = useCallback(async () => {
-    if (supabase && supabaseUser) {
+    if (teacherSession) {
       try {
-        const rows = await fetchRequests(supabase);
+        const rows = await fetchPortalRequestHistory();
         const localItems = readAdminQueueFromStorage().items;
         const merged = [...rows, ...localItems.filter((item) => !rows.some((row) => row.id === item.id))];
         setSubmitted(merged);
@@ -429,7 +482,7 @@ export function UserPortal() {
     } else {
       setSubmitted(readAdminQueueFromStorage().items);
     }
-  }, [supabase, supabaseUser, teacherSession]);
+  }, [teacherSession]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -495,7 +548,7 @@ export function UserPortal() {
   }, [loadHistory]);
 
   useEffect(() => {
-    if (!teacherSession || supabaseUser) return;
+    if (!teacherSession) return;
 
     const syncHistory = () => {
       if (document.visibilityState === "visible") {
@@ -512,7 +565,7 @@ export function UserPortal() {
       window.removeEventListener("focus", syncHistory);
       document.removeEventListener("visibilitychange", syncHistory);
     };
-  }, [teacherSession, supabaseUser, loadHistory]);
+  }, [teacherSession, loadHistory]);
 
   useEffect(() => {
     if (!supabase || !supabaseUser) return;
@@ -925,8 +978,8 @@ export function UserPortal() {
             audit: `${existing.id} 보류 후 재접수됨`
           };
 
-          if (supabase && user) {
-            await updateRequestStatus(supabase, updated);
+          if (teacherSession) {
+            await patchPortalRequest(updated.id, updated);
           } else if (teacherSession) {
             const response = await fetch(`/api/portal/requests/${encodeURIComponent(updated.id)}`, {
               method: "PATCH",
@@ -973,17 +1026,20 @@ export function UserPortal() {
       };
 
       try {
-        if (supabase && user) {
-          const { createRequest } = await import("@/lib/ops-repository");
-          await createRequest(supabase, user, item);
-          if (draft.category === "nas") {
-            await createNasPermissionRequest(supabase, {
-              user_email: draft.userEmail.trim() || user.email || "unknown@academy.local",
-              resource_name: draft.folderName.trim() || finalTitle,
-              permission_level: draft.permissionLevel || "read",
-              requested_by: user.id
-            });
-          }
+        if (teacherSession) {
+          await createPortalRequestEntry({
+            item,
+            category: draft.category,
+            metadata: requestMetadata,
+            nasPermission:
+              draft.category === "nas"
+                ? {
+                    user_email: draft.userEmail.trim() || user?.email || "unknown@academy.local",
+                    resource_name: draft.folderName.trim() || finalTitle,
+                    permission_level: draft.permissionLevel || "read"
+                  }
+                : undefined
+          });
         } else if (teacherSession) {
           const response = await fetch("/api/portal/requests", {
             method: "POST",

@@ -2,8 +2,7 @@
 
 import { ArrowLeft, Loader2, MessageSquarePlus, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { workItems as seedItems } from "@/lib/ops-data";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusPill } from "@/components/status-pill";
 import type { WorkItem } from "@/types/ops";
 import type { RequestComment, RequestDetail } from "@/types/request";
@@ -44,7 +43,7 @@ export function RequestDetailScreen({
     return "SUBMITTED";
   }
 
-  function buildLocalFallback(requestItem: WorkItem): RequestDetail {
+  const buildLocalFallback = useCallback((requestItem: WorkItem): RequestDetail => {
     const now = new Date().toISOString();
 
     return {
@@ -88,9 +87,9 @@ export function RequestDetailScreen({
         createdAt: now
       }))
     };
-  }
+  }, []);
 
-  function findLocalFallback(requestNo: string) {
+  const findLocalFallback = useCallback((requestNo: string) => {
     if (typeof window === "undefined") return null;
 
     try {
@@ -99,12 +98,11 @@ export function RequestDetailScreen({
       const localItem = parsed?.items?.find((item) => item.id === requestNo);
       if (localItem) return buildLocalFallback(localItem);
     } catch {
-      // Ignore malformed local cache and continue to seed fallback.
+      // Ignore malformed local cache.
     }
 
-    const seedItem = seedItems.find((item) => item.id === requestNo);
-    return seedItem ? buildLocalFallback(seedItem) : null;
-  }
+    return null;
+  }, [buildLocalFallback]);
 
   useEffect(() => {
     let active = true;
@@ -121,7 +119,7 @@ export function RequestDetailScreen({
 
         const data = (await response.json()) as { item?: RequestDetail; message?: string };
         if (!response.ok || !data.item) {
-          const localFallback = findLocalFallback(requestNo);
+          const localFallback = response.status === 404 ? findLocalFallback(requestNo) : null;
           if (localFallback) {
             if (!active) return;
             setDetail(localFallback);
@@ -155,7 +153,7 @@ export function RequestDetailScreen({
     return () => {
       active = false;
     };
-  }, [requestNo]);
+  }, [findLocalFallback, requestNo]);
 
   const visibleComments = useMemo(() => detail?.comments ?? [], [detail]);
 

@@ -768,7 +768,7 @@ export async function updateRequestWorkflowStatusForActor(
   ensurePermission(actor, "request:status:update", subject, "요청 상태를 변경할 권한이 없습니다.");
 
   const currentWorkflowStatus = resolveWorkflowStatus(row.workflow_status, normalizeLegacyStatus(dbRowToWorkItem(row).status));
-  let nextWorkflowStatus = payload.workflowStatus;
+  const nextWorkflowStatus = payload.workflowStatus;
   let effectiveWorkflowStatus = nextWorkflowStatus;
 
   if (nextWorkflowStatus === "REJECTED" && !String(payload.rejectionNote ?? "").trim()) {
@@ -867,17 +867,11 @@ export async function updateRequestWorkflowStatusForActor(
 export async function getDashboardMetricsForActor(supabase: SupabaseClient, actor: AuthenticatedActor, auditContext: AuditContext) {
   ensurePermission(actor, "dashboard:read", undefined, "대시보드를 조회할 권한이 없습니다.");
 
-  const { data, error } = await supabase.from("ops_requests").select("status, workflow_status, sla_due_at, completed_at, created_at");
+  const { data, error } = await supabase.from("ops_requests").select(requestSelect);
   if (error) throw error;
 
   const now = new Date();
-  const rows = (data ?? []) as Array<{
-    status: string;
-    workflow_status: string | null;
-    sla_due_at: string | null;
-    completed_at: string | null;
-    created_at: string;
-  }>;
+  const rows = ((data ?? []) as RequestRow[]).filter((row) => canActorListRow(actor, row));
 
   const overdueCount = rows.filter((row) => {
     if (!row.sla_due_at || row.completed_at) return false;
