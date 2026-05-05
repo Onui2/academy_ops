@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2, MessageSquarePlus, ShieldCheck } from "lucide-react
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusPill } from "@/components/status-pill";
+import { buildEvidenceAttachments } from "@/lib/evidence-files";
 import type { WorkItem } from "@/types/ops";
 import type { RequestComment, RequestDetail } from "@/types/request";
 
@@ -77,15 +78,7 @@ export function RequestDetailScreen({
       },
       comments: [],
       progressLogs: [],
-      attachments: (requestItem.evidenceFiles ?? []).map((fileName, index) => ({
-        id: `${requestItem.id}-local-attachment-${index + 1}`,
-        fileName,
-        fileUrl: "",
-        fileSize: 0,
-        mimeType: "",
-        uploadedBy: requestItem.requester,
-        createdAt: now
-      }))
+      attachments: buildEvidenceAttachments(requestItem.id, requestItem.evidenceFiles, requestItem.requester, now)
     };
   }, []);
 
@@ -365,9 +358,21 @@ export function RequestDetailScreen({
                 <div className="mt-4 grid gap-3">
                   {detail.attachments.length ? (
                     detail.attachments.map((file) => (
-                      <div key={file.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                        {file.fileName}
-                      </div>
+                      file.fileUrl ? (
+                        <a
+                          key={file.id}
+                          href={file.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                        >
+                          {file.fileName}
+                        </a>
+                      ) : (
+                        <div key={file.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                          {file.fileName}
+                        </div>
+                      )
                     ))
                   ) : (
                     <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">

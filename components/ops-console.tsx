@@ -56,6 +56,7 @@ import {
   updateRequestStatus
 } from "@/lib/ops-repository";
 import { StatusPill } from "@/components/status-pill";
+import { getEvidenceFileNames, parseEvidenceFile, serializeEvidenceFile } from "@/lib/evidence-files";
 import type { TeacherSession } from "@/lib/teacher-session";
 import type { BasketItem, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
@@ -67,24 +68,31 @@ type RequestForm = {
   requestItem: string;
   title: string;
   requester: string;
+  branchCode: string;
   requesterContact: string;
   neededDate: string;
   priority: WorkPriority;
   description: string;
   amount: string;
   vendor: string;
+  desktopMode: "조립 PC" | "구성 PC";
+  evidenceFiles: string[];
 };
 type EquipmentForm = {
   item: string;
   count: number;
   unitPrice: number;
   academy: string;
+  branchCode: string;
   neededDate: string;
   processType: string;
   userName: string;
   purpose: string;
   roles: string[];
   notes: string;
+  modelName: string;
+  desktopMode: "조립 PC" | "구성 PC";
+  evidenceFiles: string[];
 };
 type TabletForm = {
   academy: string;
@@ -175,7 +183,7 @@ const initialAudit: AuditEvent[] = [
   { id: "AUD-3", at: "11:20", actor: "NAS 관리자", event: "신규 직원 권한 요청 접수" }
 ];
 
-const requestIdPattern = /\bAOH-\d+\b/;
+const requestIdPattern = /\b(?:AOH-\d+|[A-Z]{2,4}-\d{8}-\d{3}-\d{3})\b/;
 
 function findAuditRequest(event: string, items: WorkItem[]) {
   const requestId = event.match(requestIdPattern)?.[0];
@@ -302,12 +310,15 @@ const defaultForm: RequestForm = {
   requestItem: "데스크톱 본체",
   title: "",
   requester: "학원본사",
+  branchCode: "",
   requesterContact: "",
   neededDate: new Date().toISOString().slice(0, 10),
   priority: "보통",
   description: "",
   amount: "",
-  vendor: ""
+  vendor: "",
+  desktopMode: "조립 PC",
+  evidenceFiles: []
 };
 
 const requestItemOptions = ["데스크톱 본체", "노트북", "모니터", "태블릿", "네트워크/NAS", "기타 장비"] as const;
@@ -394,9 +405,64 @@ function diagnose(text: string) {
   return { category: "미분류", answer: "사진, 장비명, 발생 시간을 추가한 뒤 전산 검토로 접수하세요.", escalation: true };
 }
 
-function makeId(items: WorkItem[]) {
-  const max = items.reduce((value, item) => Math.max(value, Number(item.id.replace("AOH-", "")) || 0), 1042);
-  return `AOH-${max + 1}`;
+function normalizeTicketDate(value?: string) {
+  const source = value?.trim() ? value : new Date().toISOString().slice(0, 10);
+  const digits = source.replace(/[^\d]/g, "").slice(0, 8);
+  return digits.length === 8 ? digits : new Date().toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function normalizeBranchCode(value?: string) {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (!digits) return "000";
+  return digits.slice(-3).padStart(3, "0");
+}
+
+function resolveTicketTypeCode(module: string, requestItem?: string, desktopMode?: "조립 PC" | "구성 PC") {
+  if (module === "A/S") return "AS";
+  if (module === "NAS") return "NAS";
+  if (module === "부품 구매") return "PAR";
+  if (module === "태블릿 렌탈") return "TAB";
+  if (module !== "전산 장비") return "OPS";
+
+  if (requestItem === "데스크톱 본체") {
+    return desktopMode === "구성 PC" ? "CPC" : "BPC";
+  }
+
+  if (requestItem === "노트북") return "LTP";
+  if (requestItem === "모니터") return "MON";
+  if (requestItem === "태블릿") return "TAB";
+  if (requestItem === "네트워크/NAS") return "NET";
+  return "ETC";
+}
+
+function makeId(
+  items: WorkItem[],
+  {
+    module,
+    requestDate,
+    requester,
+    branchCode,
+    requestItem,
+    desktopMode
+  }: {
+    module: string;
+    requestDate?: string;
+    requester?: string;
+    branchCode?: string;
+    requestItem?: string;
+    desktopMode?: "조립 PC" | "구성 PC";
+  }
+) {
+  const typeCode = resolveTicketTypeCode(module, requestItem, desktopMode);
+  const dateCode = normalizeTicketDate(requestDate);
+  const campusCode = normalizeBranchCode(branchCode || requester);
+  const prefix = `${typeCode}-${dateCode}-${campusCode}`;
+  const max = items.reduce((value, item) => {
+    if (!item.id.startsWith(`${prefix}-`)) return value;
+    const current = Number(item.id.split("-").pop() ?? "0");
+    return Math.max(value, Number.isFinite(current) ? current : 0);
+  }, 0);
+  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
 }
 
 function buildWebDavUrl(target: WebDavTargetInput) {
@@ -499,12 +565,16 @@ export function OpsConsole() {
     count: 1,
     unitPrice: 0,
     academy: "",
+    branchCode: "",
     neededDate: new Date().toISOString().slice(0, 10),
     processType: "신규 구매",
     userName: "",
     purpose: "",
     roles: ["데스크"],
-    notes: ""
+    notes: "",
+    modelName: "",
+    desktopMode: "조립 PC",
+    evidenceFiles: []
   });
   const [tablet, setTablet] = useState<TabletForm>({
     academy: "",
@@ -869,8 +939,23 @@ export function OpsConsole() {
     }
   };
 
-  const addRequest = async (request: Omit<WorkItem, "id">) => {
-    const id = makeId(items);
+  const addRequest = async (
+    request: Omit<WorkItem, "id">,
+    ticketMeta?: {
+      requestDate?: string;
+      branchCode?: string;
+      requestItem?: string;
+      desktopMode?: "조립 PC" | "구성 PC";
+    }
+  ) => {
+    const id = makeId(items, {
+      module: request.module,
+      requestDate: ticketMeta?.requestDate ?? request.requestedDate ?? request.due,
+      requester: request.requester,
+      branchCode: ticketMeta?.branchCode,
+      requestItem: ticketMeta?.requestItem,
+      desktopMode: ticketMeta?.desktopMode
+    });
     const next = { id, ...request };
     try {
       if (supabase && user) {
@@ -1051,16 +1136,25 @@ export function OpsConsole() {
       audit: "Router AI 분류 대기",
       description: [
         `요청 부서/지점: ${form.requester}`,
+        `지점 번호: ${normalizeBranchCode(form.branchCode)}`,
         `요청 품목: ${form.requestItem || "미지정"}`,
+        form.module === "전산 장비" && form.requestItem === "데스크톱 본체" ? `PC 구분: ${form.desktopMode}` : "",
         `담당 연락처: ${form.requesterContact || "미입력"}`,
         `희망 처리일: ${form.neededDate || "미정"}`,
+        form.evidenceFiles.length ? `첨부 파일: ${getEvidenceFileNames(form.evidenceFiles).join(", ")}` : "",
         "",
         form.description
       ].filter(Boolean).join("\n"),
       amount: form.amount,
       vendor: form.vendor,
       approvalStep: 0,
-      source: "admin_console"
+      source: "admin_console",
+      evidenceFiles: form.evidenceFiles
+    }, {
+      requestDate: form.neededDate,
+      branchCode: form.branchCode,
+      requestItem: form.requestItem,
+      desktopMode: form.desktopMode
     });
     setForm(defaultForm);
     return created ?? null;
@@ -1069,11 +1163,29 @@ export function OpsConsole() {
   const createEquipment = () => {
     const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
     const isDesktop = equipment.item === "데스크톱";
-    const basePrice = isDesktop ? basketTotal : equipment.unitPrice;
+    const isBuildDesktop = isDesktop && equipment.desktopMode === "조립 PC";
+    if (!equipment.academy.trim() || !equipment.branchCode.trim()) {
+      addToast("지점명과 지점번호를 먼저 입력해 주세요.", "error");
+      return false;
+    }
+    if (!equipment.evidenceFiles.length) {
+      addToast("구매 요청에는 지점 승인 증빙을 첨부해 주세요.", "error");
+      return false;
+    }
+    if (isBuildDesktop && partsBasket.length === 0) {
+      addToast("조립 PC는 부품 구성이 먼저 필요합니다.", "error");
+      return false;
+    }
+    if (!isBuildDesktop && (!equipment.modelName.trim() || equipment.unitPrice <= 0)) {
+      addToast("모델명과 단가를 입력해 주세요.", "error");
+      return false;
+    }
+
+    const basePrice = isBuildDesktop ? basketTotal : equipment.unitPrice;
     const total = equipment.count * basePrice;
     const needsAccountingConfirm = total > 500000;
 
-    const configLines = isDesktop
+    const configLines = isBuildDesktop
       ? [
           "--- 부품 메뉴 선택 기준 ---",
           ...(partsBasket.length > 0
@@ -1082,13 +1194,13 @@ export function OpsConsole() {
         ]
       : [];
 
-    const basketLines = !isDesktop && partsBasket.length > 0
+    const basketLines = !isBuildDesktop && partsBasket.length > 0
       ? ["--- 추가 구성품 (장바구니) ---", ...partsBasket.map(p => `${p.name}: ${p.price.toLocaleString()}원`)]
       : [];
 
-    addRequest({
+    void addRequest({
       module: "전산 장비",
-      title: `${equipment.academy} ${equipment.item} ${equipment.count}대 구매`,
+      title: `${equipment.academy} ${isDesktop ? equipment.desktopMode : equipment.item} ${equipment.count}대 구매`,
       requester: equipment.academy,
       owner: "경영지원",
       status: needsAccountingConfirm ? "승인 대기" : "검토",
@@ -1100,17 +1212,28 @@ export function OpsConsole() {
       description: [
         needsAccountingConfirm ? "안내: 50만원 초과 건은 회계팀에 컨펌 후 작성 부탁드립니다." : "",
         `품목: ${equipment.item}`,
+        `지점 번호: ${normalizeBranchCode(equipment.branchCode)}`,
+        isDesktop ? `PC 구분: ${equipment.desktopMode}` : "",
+        !isBuildDesktop ? `모델명: ${equipment.modelName || equipment.item}` : "",
         ...configLines,
         ...basketLines,
         `수량: ${equipment.count}`,
         `본체/본품 단가: ${basePrice.toLocaleString()}원`,
         `장비 사용자: ${equipment.userName || "미입력"}`,
         `사용 목적: ${equipment.purpose || "미입력"}`,
+        `첨부 파일: ${getEvidenceFileNames(equipment.evidenceFiles).join(", ")}`,
         `전달 사항: ${equipment.notes || "없음"}`
       ].filter(Boolean).join("\n"),
       approvalStep: needsAccountingConfirm ? 2 : 1,
-      source: "admin_console"
+      source: "admin_console",
+      evidenceFiles: equipment.evidenceFiles
+    }, {
+      requestDate: equipment.neededDate,
+      branchCode: equipment.branchCode,
+      requestItem: isDesktop ? "데스크톱 본체" : equipment.item,
+      desktopMode: equipment.desktopMode
     });
+    return true;
   };
 
   const createAsTicket = () => addRequest({
@@ -1595,6 +1718,14 @@ function QueueScreen(props: {
           <RequestComposer
             form={props.form}
             setForm={props.setForm}
+            ticketPreview={makeId(props.items, {
+              module: props.form.module,
+              requestDate: props.form.neededDate,
+              requester: props.form.requester,
+              branchCode: props.form.branchCode,
+              requestItem: props.form.requestItem,
+              desktopMode: props.form.desktopMode
+            })}
             createRequest={async () => {
               const created = await props.createManualRequest();
               if (created) {
@@ -1762,14 +1893,16 @@ function EquipmentScreen({
 }: {
   equipment: EquipmentForm;
   setEquipment: (value: EquipmentForm) => void;
-  createEquipment: () => void;
+  createEquipment: () => boolean;
   partsBasket: BasketItem[];
   setPartsBasket: (v: BasketItem[]) => void;
   setActiveMenu: (menu: MenuKey) => void;
 }) {
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const basketTotal = partsBasket.reduce((sum, p) => sum + p.price, 0);
   const isDesktop = equipment.item === "데스크톱";
-  const basePrice = isDesktop ? basketTotal : equipment.unitPrice;
+  const isBuildDesktop = isDesktop && equipment.desktopMode === "조립 PC";
+  const basePrice = isBuildDesktop ? basketTotal : equipment.unitPrice;
   const total = equipment.count * basePrice;
 
   return (
@@ -1783,14 +1916,17 @@ function EquipmentScreen({
             <div>
               <h3 className="font-bold">장비 사양 및 요청서</h3>
               <p className="text-sm text-slate-500">
-                {isDesktop ? "데스크톱은 부품 메뉴에서 담은 구성을 기준으로 요청합니다." : "구매하실 장비의 모델과 단가를 입력하세요."}
+                {isBuildDesktop ? "조립 PC는 부품 메뉴에서 담은 구성을 기준으로 요청합니다." : "구매하실 장비의 모델과 단가를 입력하세요."}
               </p>
             </div>
           </div>
 
           <div className="divide-y divide-slate-200">
             <EquipmentRow label="학원/지점">
-              <input value={equipment.academy} onChange={(event) => setEquipment({ ...equipment, academy: event.target.value })} className="field w-full" placeholder="학원(지점)" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <input value={equipment.academy} onChange={(event) => setEquipment({ ...equipment, academy: event.target.value })} className="field w-full" placeholder="학원(지점)" />
+                <input value={equipment.branchCode} onChange={(event) => setEquipment({ ...equipment, branchCode: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} className="field w-full" placeholder="지점번호 3자리" />
+              </div>
             </EquipmentRow>
             <EquipmentRow label="품목">
               <select value={equipment.item} onChange={(event) => setEquipment({ ...equipment, item: event.target.value })} className="field w-full">
@@ -1804,6 +1940,27 @@ function EquipmentScreen({
             </EquipmentRow>
 
             {isDesktop ? (
+              <EquipmentRow label="PC 구분">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {(["조립 PC", "구성 PC"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setEquipment({ ...equipment, desktopMode: mode })}
+                      className={`rounded-xl border px-4 py-3 text-left text-sm font-bold transition ${
+                        equipment.desktopMode === mode
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40"
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </EquipmentRow>
+            ) : null}
+
+            {isBuildDesktop ? (
               <div className="bg-blue-50/30 p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <h4 className="text-sm font-bold text-blue-900">🖥️ 데스크톱 구성 안내</h4>
@@ -1830,7 +1987,12 @@ function EquipmentScreen({
             ) : (
               <EquipmentRow label="모델명 및 단가">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <input value={equipment.item === "노트북" ? (equipment.userName ? `${equipment.userName}님 노트북` : "신규 노트북") : equipment.item} className="field w-full" readOnly disabled />
+                  <input
+                    value={equipment.modelName}
+                    onChange={(event) => setEquipment({ ...equipment, modelName: event.target.value })}
+                    className="field w-full"
+                    placeholder={isDesktop ? "예: Dell OptiPlex / 삼성 DM530" : "모델명 입력"}
+                  />
                   <div className="relative">
                     <input type="number" min={0} value={equipment.unitPrice} onChange={(event) => setEquipment({ ...equipment, unitPrice: Number(event.target.value) })} className="field w-full pr-10" placeholder="대당 단가 입력" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
@@ -1839,7 +2001,7 @@ function EquipmentScreen({
               </EquipmentRow>
             )}
 
-            {partsBasket.length > 0 && (
+            {!isBuildDesktop && partsBasket.length > 0 && (
               <div className="bg-slate-50 p-5">
                 <div className="mb-3 flex items-center justify-between">
                    <h4 className="text-xs font-bold text-slate-800">📦 추가 구성품 (장바구니)</h4>
@@ -1873,15 +2035,49 @@ function EquipmentScreen({
             <EquipmentRow label="기타 전달 사항">
               <textarea value={equipment.notes} onChange={(event) => setEquipment({ ...equipment, notes: event.target.value })} className="field min-h-[80px] w-full py-3" placeholder="설치 위치, 선호 브랜드, 기존 장비 반납 여부 등을 적어주세요." />
             </EquipmentRow>
+            <EquipmentRow label="승인 증빙 첨부">
+              <div className="grid gap-3">
+                <input
+                  type="file"
+                  multiple
+                  onChange={async (event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    if (!files.length) return;
+                    setIsUploadingEvidence(true);
+                    try {
+                      const uploaded = await uploadEvidenceFiles(files);
+                      setEquipment({ ...equipment, evidenceFiles: uploaded });
+                    } catch (error) {
+                      alert(error instanceof Error ? error.message : "첨부 파일 업로드에 실패했습니다.");
+                    } finally {
+                      setIsUploadingEvidence(false);
+                      event.target.value = "";
+                    }
+                  }}
+                  className="block w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-bold file:text-white"
+                />
+                <p className="text-xs text-slate-500">구매 요청은 각 원에서 승인받은 내역을 첨부해 주세요.</p>
+                {isUploadingEvidence ? <p className="text-xs font-bold text-blue-600">첨부 파일 업로드 중...</p> : null}
+                {equipment.evidenceFiles.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {getEvidenceFileNames(equipment.evidenceFiles).map((file) => (
+                      <span key={file} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600">
+                        {file}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </EquipmentRow>
           </div>
 
           <div className="grid gap-4 border-t border-slate-200 bg-slate-50/50 px-5 py-6 md:grid-cols-[1fr_auto] md:items-center">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-500 uppercase">
-                  {isDesktop ? "부품 합계" : "본품 단가"} {basePrice.toLocaleString()}원
+                  {isBuildDesktop ? "부품 합계" : "본품 단가"} {basePrice.toLocaleString()}원
                 </span>
-                {!isDesktop && partsBasket.length > 0 ? <span className="text-[10px] font-bold text-blue-600">+ 구성품 {basketTotal.toLocaleString()}원</span> : null}
+                {!isBuildDesktop && partsBasket.length > 0 ? <span className="text-[10px] font-bold text-blue-600">+ 구성품 {basketTotal.toLocaleString()}원</span> : null}
               </div>
               <div className={`text-2xl font-black tracking-tighter ${(equipment.count >= 2 || basePrice >= 700000) ? "text-rose-600" : "text-blue-600"}`}>
                 <span className="mr-1 text-sm font-bold text-slate-400">총 견적</span>
@@ -1890,10 +2086,12 @@ function EquipmentScreen({
             </div>
             <button
               onClick={() => {
+                if (isUploadingEvidence) return;
                 setEquipment({ ...equipment, unitPrice: basePrice });
-                createEquipment();
-                if (isDesktop) setPartsBasket([]);
+                const created = createEquipment();
+                if (created && isBuildDesktop) setPartsBasket([]);
               }}
+              disabled={isUploadingEvidence}
               className="focus-ring inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
             >
               <FilePlus2 className="h-4 w-4" aria-hidden="true" />
@@ -2283,7 +2481,38 @@ function extractAmountValue(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; setForm: (value: RequestForm) => void; createRequest: () => void | Promise<void> }) {
+async function uploadEvidenceFiles(files: File[]) {
+  const body = new FormData();
+  files.forEach((file) => body.append("files", file));
+
+  const response = await fetch("/api/uploads/evidence", {
+    method: "POST",
+    body
+  });
+
+  const data = (await response.json()) as {
+    message?: string;
+    files?: Array<{ fileName: string; fileUrl: string; fileSize: number; mimeType: string }>;
+  };
+
+  if (!response.ok || !data.files) {
+    throw new Error(data.message ?? "첨부 파일 업로드에 실패했습니다.");
+  }
+
+  return data.files.map((file) => serializeEvidenceFile(file));
+}
+
+function RequestComposer({
+  form,
+  setForm,
+  createRequest,
+  ticketPreview
+}: {
+  form: RequestForm;
+  setForm: (value: RequestForm) => void;
+  createRequest: () => void | Promise<void>;
+  ticketPreview: string;
+}) {
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -2291,6 +2520,8 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [step, setStep] = useState(0);
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
 
   const earliestDate = useMemo(() => getEarliestSelectableDate(form), [form]);
   const earliestIso = useMemo(() => earliestDate.toISOString().slice(0, 10), [earliestDate]);
@@ -2347,24 +2578,20 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
         : form.module === "전산 장비" && form.requestItem === "모니터"
           ? "모니터는 최소 영업일 3일 이후부터 선택 가능합니다."
           : form.module === "전산 장비" && (form.requestItem === "노트북" || form.requestItem === "태블릿")
-          ? "노트북/태블릿은 최소 영업일 4일 이후부터 선택 가능합니다."
+            ? "노트북/태블릿은 최소 영업일 4일 이후부터 선택 가능합니다."
             : "네트워크/NAS 및 기타 장비는 최소 영업일 7일 이후부터 선택 가능합니다.";
-  const priorityTone =
-    form.priority === "긴급"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : form.priority === "높음"
-        ? "border-amber-200 bg-amber-50 text-amber-700"
-        : form.priority === "보통"
-          ? "border-blue-200 bg-blue-50 text-blue-700"
-          : "border-slate-200 bg-slate-50 text-slate-600";
+  const isPurchaseModule = form.module === "전산 장비" || form.module === "부품 구매";
+  const isDesktop = form.module === "전산 장비" && form.requestItem === "데스크톱 본체";
   const requiredErrors = {
-    title: !form.title.trim(),
+    requestItem: form.module === "전산 장비" && !form.requestItem.trim(),
     requester: !form.requester.trim(),
+    branchCode: !form.branchCode.trim(),
     requesterContact: !form.requesterContact.trim(),
     neededDate: !form.neededDate.trim(),
+    title: !form.title.trim(),
     amount: !form.amount.trim(),
     description: !form.description.trim(),
-    requestItem: form.module === "전산 장비" && !form.requestItem.trim()
+    evidenceFiles: isPurchaseModule && form.evidenceFiles.length === 0
   };
   const hasRequiredErrors = Object.values(requiredErrors).some(Boolean);
   const showError = (key: keyof typeof requiredErrors) => submitAttempted && requiredErrors[key];
@@ -2399,273 +2626,381 @@ function RequestComposer({ form, setForm, createRequest }: { form: RequestForm; 
     form.priority === "긴급"
       ? "긴급 우선순위로 가장 먼저 검토됩니다."
       : `현재 규칙상 가장 빠른 처리 가능일은 ${formatDateLabel(earliestIso)} 입니다.`;
+  const steps = [
+    { title: "업무 구분", desc: "업무 유형과 세부 요청을 먼저 선택합니다." },
+    { title: "지점 정보", desc: "지점번호와 연락처, 희망 일정을 입력합니다." },
+    { title: "상세 입력", desc: "제목, 예산, 승인 증빙을 정리합니다." },
+    { title: "최종 확인", desc: "번호 체계와 라우팅을 확인한 뒤 접수합니다." }
+  ];
+  const stepErrors = [
+    requiredErrors.requestItem,
+    requiredErrors.requester || requiredErrors.branchCode || requiredErrors.requesterContact || requiredErrors.neededDate,
+    requiredErrors.title || requiredErrors.amount || requiredErrors.description || requiredErrors.evidenceFiles,
+    false
+  ];
+
+  const goNext = async () => {
+    if (isUploadingEvidence) {
+      setSubmitAttempted(true);
+      return;
+    }
+
+    if (step < steps.length - 1) {
+      if (stepErrors[step]) {
+        setSubmitAttempted(true);
+        return;
+      }
+      setSubmitAttempted(false);
+      setStep((current) => current + 1);
+      return;
+    }
+
+    if (hasRequiredErrors) {
+      setSubmitAttempted(true);
+      const firstErrorStep = stepErrors.findIndex(Boolean);
+      if (firstErrorStep >= 0) setStep(firstErrorStep);
+      return;
+    }
+
+    await createRequest();
+  };
 
   return (
     <section className="grid gap-6">
       <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-slate-50 p-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Internal Request Form</p>
-            <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">경영지원 요청서</h3>
-            <p className="mt-2 text-sm text-slate-500">운영팀 검토와 승인 라우팅에 필요한 정보를 한 번에 정리하는 접수 문서입니다.</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Ticket Wizard</p>
+            <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">{steps[step].title}</h3>
+            <p className="mt-2 text-sm text-slate-500">{steps[step].desc}</p>
           </div>
-          <div className={`rounded-2xl border px-4 py-3 text-center shadow-sm ${priorityTone}`}>
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Processing</p>
-            <p className="mt-1 text-sm font-black">{form.priority}</p>
-            <p className="text-xs opacity-80">{form.neededDate || "처리일 미정"}</p>
+          <div className="rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">티켓 번호</p>
+            <p className="mt-1 font-mono text-sm font-black text-slate-900">{ticketPreview}</p>
+            <p className="mt-1 text-xs text-slate-500">유형 코드 + 날짜 + 지점번호 + 순번</p>
           </div>
+        </div>
+        <div className="mt-5 grid gap-2 sm:grid-cols-4">
+          {steps.map((item, index) => (
+            <div
+              key={item.title}
+              className={`rounded-xl border px-4 py-3 ${
+                index === step
+                  ? "border-blue-500 bg-blue-600 text-white"
+                  : index < step
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-white text-slate-500"
+              }`}
+            >
+              <p className="text-[10px] font-black uppercase tracking-wider">Step {index + 1}</p>
+              <p className="mt-1 text-sm font-black">{item.title}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid gap-5">
-          <section className="rounded-2xl border border-slate-200 bg-white">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h4 className="text-sm font-black text-slate-900">기본 신청 정보</h4>
-              <p className="mt-1 text-xs text-slate-500">모듈, 요청 제목, 신청 부서와 우선순위를 먼저 기록합니다.</p>
+      {step === 0 ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              {[
+                { value: "전산 장비", label: "전산 장비", desc: "노트북, 데스크톱, 모니터, 네트워크 장비" },
+                { value: "부품 구매", label: "부품 구매", desc: "소모품, 주변기기, 부품 발주" },
+                { value: "A/S", label: "A/S", desc: "장애 접수, 점검 요청, 수리 문의" },
+                { value: "NAS", label: "NAS", desc: "권한, 접속, 네트워크/NAS 지원" }
+              ].map((module) => (
+                <button
+                  key={module.value}
+                  type="button"
+                  onClick={() => setForm({
+                    ...form,
+                    module: module.value,
+                    requestItem: module.value === "전산 장비" ? form.requestItem : module.value === "NAS" ? "네트워크/NAS" : "기타 장비"
+                  })}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    form.module === module.value
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30"
+                  }`}
+                >
+                  <p className="text-sm font-black text-slate-900">{module.label}</p>
+                  <p className="mt-1 text-xs text-slate-500">{module.desc}</p>
+                </button>
+              ))}
             </div>
-            <div className="grid gap-4 p-5">
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">요청 모듈</span>
-                  <select value={form.module} onChange={(event) => setForm({ ...form, module: event.target.value, requestItem: event.target.value === "전산 장비" ? form.requestItem : event.target.value === "NAS" ? "네트워크/NAS" : "기타 장비" })} className="field" aria-label="모듈">
-                    <option>전산 장비</option>
-                    <option>A/S</option>
-                    <option>부품 구매</option>
-                    <option>NAS</option>
-                  </select>
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 품목")}</span>
-                  <select
-                    value={form.requestItem}
-                    onChange={(event) => setForm({ ...form, requestItem: event.target.value })}
-                    className={`field ${showError("requestItem") ? "border-rose-300 bg-rose-50/40" : ""}`}
-                    aria-label="요청 품목"
-                    disabled={form.module !== "전산 장비"}
-                  >
-                    {requestItemOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                  <FieldError message="전산 장비 요청은 품목을 선택해 주세요." visible={showError("requestItem")} />
-                </label>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">우선순위</span>
-                  <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as WorkPriority })} className="field" aria-label="우선순위">
-                    <option>낮음</option>
-                    <option>보통</option>
-                    <option>높음</option>
-                    <option>긴급</option>
-                  </select>
-                </label>
-              </div>
-              <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 제목")}</span>
-                <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={`field ${showError("title") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 범어점 상담실 모니터 2대 신규 구매 요청" />
-                <FieldError message="요청 제목은 필수입니다." visible={showError("title")} />
-              </label>
-            </div>
-          </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h4 className="text-sm font-black text-slate-900">신청 부서 및 일정</h4>
-              <p className="mt-1 text-xs text-slate-500">누가 요청했고 언제까지 필요한지 남겨두면 검토가 훨씬 빨라집니다.</p>
+            {form.module === "전산 장비" ? (
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 품목")}</span>
+                <select
+                  value={form.requestItem}
+                  onChange={(event) => setForm({ ...form, requestItem: event.target.value })}
+                  className={`field ${showError("requestItem") ? "border-rose-300 bg-rose-50/40" : ""}`}
+                >
+                  {requestItemOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+                <FieldError message="전산 장비 요청은 품목을 선택해 주세요." visible={showError("requestItem")} />
+              </label>
+            ) : null}
+
+            {isDesktop ? (
+              <div className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("PC 구분")}</span>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {(["조립 PC", "구성 PC"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setForm({ ...form, desktopMode: mode })}
+                      className={`rounded-2xl border px-4 py-4 text-left transition ${
+                        form.desktopMode === mode
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40"
+                      }`}
+                    >
+                      <p className="text-sm font-black">{mode}</p>
+                      <p className="mt-1 text-xs">{mode === "조립 PC" ? "부품 기준으로 견적을 올립니다." : "완제품 모델 기준으로 견적을 올립니다."}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm text-blue-900">
+              <p className="font-black">업무 구분 메모</p>
+              <p className="mt-1 leading-relaxed">
+                {isPurchaseModule
+                  ? "구매 계열 요청은 각 원 승인 내역 첨부가 필수입니다."
+                  : "선택한 업무 유형에 맞춰 담당자와 처리 흐름이 자동으로 분기됩니다."}
+              </p>
             </div>
-            <div className="grid gap-4 p-5 md:grid-cols-2">
-              <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 부서/지점")}</span>
-                <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className={`field ${showError("requester") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="학원본사" />
-                <FieldError message="요청 부서/지점을 입력해 주세요." visible={showError("requester")} />
-              </label>
-              <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">{requiredLabel("담당 연락처")}</span>
-                <input value={form.requesterContact} onChange={(event) => setForm({ ...form, requesterContact: event.target.value })} className={`field ${showError("requesterContact") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 내선 203 / 010-0000-0000" />
-                <FieldError message="담당 연락처를 입력해 주세요." visible={showError("requesterContact")} />
-              </label>
-              <label className="grid gap-2 md:col-span-2">
-                <span className="text-xs font-bold text-slate-500">{requiredLabel("희망 처리일")}</span>
-                <div className={`rounded-2xl border bg-white p-4 ${showError("neededDate") ? "border-rose-300 bg-rose-50/20" : "border-slate-200"}`}>
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <CalendarDays className="h-4 w-4 text-blue-600" aria-hidden="true" />
-                      <div className="min-w-0">
-                        <p className="whitespace-nowrap text-sm font-black text-slate-900">{formatDateLabel(form.neededDate)}</p>
-                        <p className="whitespace-nowrap text-xs text-slate-500">{leadMessage}</p>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <div className="mr-2 whitespace-nowrap text-sm font-black text-slate-800">{new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long" }).format(calendarMonth)}</div>
-                      <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">이전</button>
-                      <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">다음</button>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCalendarOpen((current) => !current)}
-                    className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100"
-                  >
+          </div>
+        </section>
+      ) : null}
+
+      {step === 1 ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 지점명")}</span>
+              <input value={form.requester} onChange={(event) => setForm({ ...form, requester: event.target.value })} className={`field ${showError("requester") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 범어점" />
+              <FieldError message="요청 지점명을 입력해 주세요." visible={showError("requester")} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("지점번호")}</span>
+              <input value={form.branchCode} onChange={(event) => setForm({ ...form, branchCode: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} className={`field ${showError("branchCode") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 101" />
+              <FieldError message="지점번호를 입력해 주세요." visible={showError("branchCode")} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("담당 연락처")}</span>
+              <input value={form.requesterContact} onChange={(event) => setForm({ ...form, requesterContact: event.target.value })} className={`field ${showError("requesterContact") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 010-0000-0000" />
+              <FieldError message="담당 연락처를 입력해 주세요." visible={showError("requesterContact")} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">우선순위</span>
+              <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as WorkPriority })} className="field">
+                <option>낮음</option>
+                <option>보통</option>
+                <option>높음</option>
+                <option>긴급</option>
+              </select>
+            </label>
+            <label className="grid gap-2 md:col-span-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("희망 처리일")}</span>
+              <div className={`rounded-2xl border bg-white p-4 ${showError("neededDate") ? "border-rose-300 bg-rose-50/20" : "border-slate-200"}`}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-blue-600" aria-hidden="true" />
                     <div className="min-w-0">
                       <p className="whitespace-nowrap text-sm font-black text-slate-900">{formatDateLabel(form.neededDate)}</p>
-                      <p className="whitespace-nowrap text-xs text-slate-500">주말과 공휴일은 자동으로 제외됩니다.</p>
+                      <p className="whitespace-nowrap text-xs text-slate-500">{leadMessage}</p>
                     </div>
-                    <span className="text-xs font-bold text-blue-600">{calendarOpen ? "닫기" : "달력 열기"}</span>
-                  </button>
-                  {calendarOpen ? (
-                    <>
-                      <div className="mb-2 mt-4 grid grid-cols-7 gap-2 text-center text-[11px] font-bold text-slate-400">
-                        {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span key={day}>{day}</span>)}
-                      </div>
-                      <div className="grid grid-cols-7 gap-2">
-                        {calendarDays.map(({ day, iso, disabled, outside, selected }) => (
-                          <button
-                            key={iso}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => {
-                              setForm({ ...form, neededDate: iso });
-                              setCalendarOpen(false);
-                            }}
-                            className={`h-11 rounded-xl text-sm font-bold transition ${
-                              selected
-                                ? "bg-blue-600 text-white shadow-lg shadow-blue-100"
-                                : disabled
-                                  ? "cursor-not-allowed bg-slate-50 text-slate-300"
-                                  : outside
-                                    ? "bg-white text-slate-300 hover:bg-slate-50"
-                                    : "bg-white text-slate-700 hover:border hover:border-blue-200 hover:bg-blue-50"
-                            }`}
-                          >
-                            {day.getDate()}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <div className="mr-2 whitespace-nowrap text-sm font-black text-slate-800">{new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long" }).format(calendarMonth)}</div>
+                    <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">이전</button>
+                    <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">다음</button>
+                  </div>
                 </div>
-                <FieldError message="희망 처리일을 선택해 주세요." visible={showError("neededDate")} />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h4 className="text-sm font-black text-slate-900">예산 및 요청 상세</h4>
-              <p className="mt-1 text-xs text-slate-500">수량, 예산, 검토 대상 업체와 실제 필요한 내용을 상세히 적어주세요.</p>
-            </div>
-            <div className="grid gap-4 p-5">
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">{requiredLabel("예산 또는 수량")}</span>
-                  <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className={`field ${showError("amount") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 2대 / 1,200,000원" />
-                  <FieldError message="예산 또는 수량을 입력해 주세요." visible={showError("amount")} />
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-xs font-bold text-slate-500">업체</span>
-                  <input value={form.vendor} onChange={(event) => setForm({ ...form, vendor: event.target.value })} className="field" placeholder="예: 다나와 / 협력업체명 / 미정" />
-                </label>
+                <button
+                  type="button"
+                  onClick={() => setCalendarOpen((current) => !current)}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100"
+                >
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-sm font-black text-slate-900">{formatDateLabel(form.neededDate)}</p>
+                    <p className="whitespace-nowrap text-xs text-slate-500">주말과 공휴일은 자동으로 제외됩니다.</p>
+                  </div>
+                  <span className="text-xs font-bold text-blue-600">{calendarOpen ? "닫기" : "달력 열기"}</span>
+                </button>
+                {calendarOpen ? (
+                  <>
+                    <div className="mb-2 mt-4 grid grid-cols-7 gap-2 text-center text-[11px] font-bold text-slate-400">
+                      {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span key={day}>{day}</span>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-2">
+                      {calendarDays.map(({ day, iso, disabled, outside, selected }) => (
+                        <button
+                          key={iso}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => {
+                            setForm({ ...form, neededDate: iso });
+                            setCalendarOpen(false);
+                          }}
+                          className={`h-11 rounded-xl text-sm font-bold transition ${
+                            selected
+                              ? "bg-blue-600 text-white shadow-lg shadow-blue-100"
+                              : disabled
+                                ? "cursor-not-allowed bg-slate-50 text-slate-300"
+                                : outside
+                                  ? "bg-white text-slate-300 hover:bg-slate-50"
+                                  : "bg-white text-slate-700 hover:border hover:border-blue-200 hover:bg-blue-50"
+                          }`}
+                        >
+                          {day.getDate()}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
               </div>
+              <FieldError message="희망 처리일을 선택해 주세요." visible={showError("neededDate")} />
+            </label>
+          </div>
+        </section>
+      ) : null}
+
+      {step === 2 ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="grid gap-4">
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("요청 제목")}</span>
+              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={`field ${showError("title") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 범어점 상담실 모니터 2대 신규 구매 요청" />
+              <FieldError message="요청 제목은 필수입니다." visible={showError("title")} />
+            </label>
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
-                <span className="text-xs font-bold text-slate-500">{requiredLabel("상세 내용")}</span>
-                <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className={`min-h-40 rounded-xl border bg-white p-4 text-sm outline-none focus:border-blue-500 ${showError("description") ? "border-rose-300 bg-rose-50/40" : "border-gray-200"}`} placeholder="요청 배경, 설치 위치, 사용 목적, 참고 사항, 승인에 필요한 내용을 자세히 적어주세요." />
-                <FieldError message="상세 내용을 입력해 주세요." visible={showError("description")} />
+                <span className="text-xs font-bold text-slate-500">{requiredLabel("예산 또는 수량")}</span>
+                <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className={`field ${showError("amount") ? "border-rose-300 bg-rose-50/40" : ""}`} placeholder="예: 2대 / 1,200,000원" />
+                <FieldError message="예산 또는 수량을 입력해 주세요." visible={showError("amount")} />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs font-bold text-slate-500">업체</span>
+                <input value={form.vendor} onChange={(event) => setForm({ ...form, vendor: event.target.value })} className="field" placeholder="예: 다나와 / 협력업체명 / 미정" />
               </label>
             </div>
-          </section>
-        </div>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{requiredLabel("상세 내용")}</span>
+              <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className={`min-h-40 rounded-xl border bg-white p-4 text-sm outline-none focus:border-blue-500 ${showError("description") ? "border-rose-300 bg-rose-50/40" : "border-gray-200"}`} placeholder="요청 배경, 설치 위치, 사용 목적, 참고 사항, 승인에 필요한 내용을 자세히 적어주세요." />
+              <FieldError message="상세 내용을 입력해 주세요." visible={showError("description")} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold text-slate-500">{isPurchaseModule ? requiredLabel("승인 증빙 첨부") : "첨부 파일"}</span>
+              <input
+                type="file"
+                multiple
+                onChange={async (event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  if (!files.length) return;
+                  setIsUploadingEvidence(true);
+                  try {
+                    const uploaded = await uploadEvidenceFiles(files);
+                    setForm({ ...form, evidenceFiles: uploaded });
+                  } catch (error) {
+                    alert(error instanceof Error ? error.message : "첨부 파일 업로드에 실패했습니다.");
+                  } finally {
+                    setIsUploadingEvidence(false);
+                    event.target.value = "";
+                  }
+                }}
+                className={`block w-full rounded-xl border border-dashed bg-slate-50 px-4 py-3 text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-bold file:text-white ${showError("evidenceFiles") ? "border-rose-300" : "border-slate-300"}`}
+              />
+              <p className="text-xs text-slate-500">
+                {isPurchaseModule ? "구매 요청은 각 원에서 승인받은 내역을 첨부해야 다음 단계로 넘어갈 수 있습니다." : "필요한 참고 파일이 있으면 함께 첨부해 주세요."}
+              </p>
+              {isUploadingEvidence ? <p className="text-xs font-bold text-blue-600">첨부 파일 업로드 중...</p> : null}
+              {form.evidenceFiles.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {getEvidenceFileNames(form.evidenceFiles).map((file) => (
+                    <span key={file} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600">
+                      {file}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <FieldError message="첨부 파일을 등록해 주세요." visible={showError("evidenceFiles")} />
+            </label>
+          </div>
+        </section>
+      ) : null}
 
-        <aside className="grid gap-5 self-start">
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Live Summary</p>
-              <h4 className="mt-1 text-sm font-black text-slate-900">실시간 접수 요약</h4>
-            </div>
-            <div className="grid gap-3 p-5">
-              <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                <p className="text-[11px] font-bold text-slate-400">제목 미리보기</p>
-                <p className="mt-1 text-sm font-black text-slate-900">
-                  {form.title.trim() || `${form.requester || "지점"} ${requestItemLabel} 요청`}
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
+      {step === 3 ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="grid gap-5">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+              <p className="text-[11px] font-bold text-slate-400">접수 요약</p>
+              <p className="mt-1 text-lg font-black text-slate-900">{form.title.trim() || `${form.requester || "지점"} ${requestItemLabel} 요청`}</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">업무 구분</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{form.module} · {requestItemLabel}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <p className="text-[11px] font-bold text-slate-400">예상 담당</p>
                   <p className="mt-1 text-sm font-black text-slate-900">{ownerLabel}</p>
                 </div>
-                <div className="rounded-xl border border-slate-100 bg-white px-4 py-3">
-                  <p className="text-[11px] font-bold text-slate-400">요청 분류</p>
-                  <p className="mt-1 text-sm font-black text-slate-900">{form.module} · {requestItemLabel}</p>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">지점 정보</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{form.requester} · {normalizeBranchCode(form.branchCode)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-400">처리 메모</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{completionHint}</p>
                 </div>
               </div>
-              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                <p className="font-black">처리 메모</p>
-                <p className="mt-1 leading-relaxed">{completionHint}</p>
-              </div>
             </div>
-          </section>
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-violet-50 px-5 py-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-600">Routing</p>
-              <h4 className="mt-1 text-sm font-black text-slate-900">자동 라우팅 안내</h4>
-            </div>
-            <div className="grid gap-3 p-5">
-              {routeSteps.map((step, index) => (
-                <div key={step} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="grid gap-3">
+              {routeSteps.map((routeStep, index) => (
+                <div key={routeStep} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[11px] font-black text-white">
                     {index + 1}
                   </div>
-                  <p className="pt-0.5 text-sm font-medium leading-relaxed text-slate-700">{step}</p>
+                  <p className="pt-0.5 text-sm font-medium leading-relaxed text-slate-700">{routeStep}</p>
                 </div>
               ))}
             </div>
-          </section>
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-100">
-                  <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Checklist</p>
-                  <h4 className="mt-1 text-sm font-black text-slate-900">접수 전 확인</h4>
-                </div>
-              </div>
-            </div>
-            <div className="grid gap-3 p-5">
-              <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">
-                `*` 표시 항목은 필수 입력값입니다.
-              </div>
-              {[
-                "`지점 + 품목 + 목적` 순서로 제목을 적으면 한눈에 식별하기 좋습니다.",
-                "예산 또는 수량이 정확할수록 승인과 발주가 빨라집니다.",
-                "긴급 건은 상세 내용에 운영 영향과 처리 사유를 꼭 적어주세요."
-              ].map((item) => (
-                <div key={item} className="flex gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600">
-                  <span className="mt-0.5 text-blue-600">•</span>
-                  <p>{item}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-          {submitAttempted && hasRequiredErrors ? (
-            <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
-              필수 입력값을 모두 작성한 뒤 요청서를 접수할 수 있습니다.
-            </p>
-          ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-slate-500">
+          {isUploadingEvidence ? "첨부 파일 업로드가 끝나면 다음 단계로 이동할 수 있습니다." : submitAttempted && stepErrors[step] ? "현재 단계의 필수 항목을 먼저 입력해 주세요." : `${step + 1} / ${steps.length} 단계`}
+        </div>
+        <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => {
-              setSubmitAttempted(true);
-              if (hasRequiredErrors) return;
-              createRequest();
+              setSubmitAttempted(false);
+              setStep((current) => Math.max(current - 1, 0));
             }}
-            className="focus-ring inline-flex h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-xl shadow-blue-100 hover:bg-blue-700"
+            disabled={step === 0}
+            className="focus-ring inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            요청서 접수
+            이전
           </button>
-        </aside>
+          <button
+            type="button"
+            onClick={() => void goNext()}
+            disabled={isUploadingEvidence}
+            className="focus-ring inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-sm font-black text-white hover:bg-blue-700"
+          >
+            {step === steps.length - 1 ? "요청서 접수" : "다음"}
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -2738,12 +3073,31 @@ function DetailPanel({ item, role, approve, reject }: { item: WorkItem; role: Us
         <Info label="모듈" value={item.module} /><Info label="요청자" value={item.requester} /><Info label="담당" value={item.owner} /><Info label="우선순위" value={item.priority} /><Info label="예산/수량" value={item.amount || "-"} /><Info label="업체" value={item.vendor || "-"} />
       </dl>
       <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 whitespace-pre-line">{item.description || item.audit}</p>
+      {item.evidenceFiles?.length ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <p className="font-bold text-slate-800">첨부 파일</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {item.evidenceFiles.map((entry) => {
+              const file = parseEvidenceFile(entry);
+              return file.fileUrl ? (
+                <a key={entry} href={file.fileUrl} target="_blank" rel="noreferrer" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                  {file.fileName}
+                </a>
+              ) : (
+                <span key={entry} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-600">
+                  {file.fileName}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       {item.priority === "긴급" ? (
         <div className="mt-3 grid gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
           <p className="font-bold text-red-800">긴급 증빙</p>
           <Info label="긴급 사유" value={item.urgentReason || "미작성"} />
           <Info label="영향 범위" value={item.urgentImpact || "미작성"} />
-          <Info label="증빙 파일" value={item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"} />
+          <Info label="증빙 파일" value={item.evidenceFiles?.length ? getEvidenceFileNames(item.evidenceFiles).join(", ") : "미첨부"} />
         </div>
       ) : null}
       {item.approvalNote ? (
@@ -2777,6 +3131,7 @@ function printWorkItem(item: WorkItem) {
     ["기한", item.due],
     ["예산/수량", item.amount || "-"],
     ["업체", item.vendor || "-"],
+    ["첨부 파일", item.evidenceFiles?.length ? getEvidenceFileNames(item.evidenceFiles).join(", ") : "미첨부"],
     ["승인 의견", item.approvalNote || "-"],
     ["보류 사유", item.rejectionNote || "-"]
   ];
@@ -2784,7 +3139,6 @@ function printWorkItem(item: WorkItem) {
   if (item.priority === "긴급") {
     rows.push(["긴급 사유", item.urgentReason || "미작성"]);
     rows.push(["영향 범위", item.urgentImpact || "미작성"]);
-    rows.push(["증빙 파일", item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"]);
   }
 
   popup.document.write(`<!doctype html>
@@ -2836,7 +3190,7 @@ function ApprovalNoteForm({ item, onSubmit, onCancel }: { item: WorkItem; onSubm
           <p className="font-bold">긴급 검토</p>
           <p className="mt-1">사유: {item.urgentReason || "미작성"}</p>
           <p>영향: {item.urgentImpact || "미작성"}</p>
-          <p>증빙: {item.evidenceFiles?.length ? item.evidenceFiles.join(", ") : "미첨부"}</p>
+          <p>증빙: {item.evidenceFiles?.length ? getEvidenceFileNames(item.evidenceFiles).join(", ") : "미첨부"}</p>
         </div>
       ) : null}
       <textarea

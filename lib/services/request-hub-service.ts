@@ -7,6 +7,8 @@ import type { RequestPermissionSubject } from "@/lib/harness/permission/permissi
 import { runPolicyHarness } from "@/lib/harness/policy/policy-harness";
 import { buildInitialSla, buildSlaSnapshot, applySlaPauseState } from "@/lib/harness/sla/sla-harness";
 import { resolveLegacyStatusFromWorkflowStatus, resolveWorkflowStatus, runWorkflowHarness } from "@/lib/harness/workflow/workflow-harness";
+import { buildEvidenceAttachments, parseEvidenceFile } from "@/lib/evidence-files";
+import { createEvidenceSignedUrl } from "@/lib/evidence-storage";
 import {
   canTeacherSessionAccessRow,
   dbRowToWorkItem,
@@ -517,6 +519,20 @@ export async function getRequestDetailForActor(
   const approvalState = await resolveApprovalState(supabase, row.id);
   const workItem = withExtendedWorkItem(row);
   const workflowStatus = resolveWorkflowStatus(row.workflow_status, normalizeLegacyStatus(workItem.status));
+  const rawEvidenceFiles = row.evidence_files ?? [];
+  const attachments = await Promise.all(
+    buildEvidenceAttachments(requestNo, rawEvidenceFiles, row.requester_name ?? actor.actorName, row.created_at).map(async (attachment, index) => {
+      const parsed = parseEvidenceFile(rawEvidenceFiles[index] ?? "");
+      if (!parsed.storagePath) return attachment;
+
+      try {
+        const signedUrl = await createEvidenceSignedUrl(parsed.storagePath);
+        return { ...attachment, fileUrl: signedUrl };
+      } catch {
+        return attachment;
+      }
+    })
+  );
 
   if (auditContext) {
     await runAuditHarness(supabase, {
@@ -559,15 +575,7 @@ export async function getRequestDetailForActor(
     }),
     comments,
     progressLogs,
-    attachments: (row.evidence_files ?? []).map((fileName, index) => ({
-      id: `${requestNo}-attachment-${index + 1}`,
-      fileName,
-      fileUrl: "",
-      fileSize: 0,
-      mimeType: "",
-      uploadedBy: row.requester_name ?? actor.actorName,
-      createdAt: row.created_at
-    }))
+    attachments
   } satisfies RequestDetail;
 }
 
