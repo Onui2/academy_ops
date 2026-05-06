@@ -351,6 +351,8 @@ export function UserPortal() {
   const [partQuery, setPartQuery] = useState("");
   const [selectedPartCategory, setSelectedPartCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+  const [equipmentWizardStep, setEquipmentWizardStep] = useState(0);
+  const [desktopBuildMode, setDesktopBuildMode] = useState<"preset" | "custom" | null>(null);
   const shouldLoadPartPrices =
     draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기");
 
@@ -437,6 +439,11 @@ export function UserPortal() {
     if (teacherSession?.branchName?.trim()) return teacherSession.branchName.trim();
     if (teacherSession?.brandName?.trim()) return teacherSession.brandName.trim();
     return "Teacher Portal";
+  }, [teacherSession]);
+  const sessionAcademy = useMemo(() => {
+    if (teacherSession?.branchName?.trim()) return teacherSession.branchName.trim();
+    if (teacherSession?.brandName?.trim()) return teacherSession.brandName.trim();
+    return "";
   }, [teacherSession]);
 
   const pushToast = useCallback((message: string, type: ToastItem["type"] = "info") => {
@@ -661,6 +668,16 @@ export function UserPortal() {
   }, [liveEquipmentParts, partQuery, selectedPartCategory, selectedSubCategory]);
 
   useEffect(() => {
+    setEquipmentWizardStep(0);
+    setDesktopBuildMode(null);
+  }, [draft.category, draft.requestItem]);
+
+  useEffect(() => {
+    if (!sessionAcademy) return;
+    setDraft((current) => (current.academy === sessionAcademy ? current : { ...current, academy: sessionAcademy }));
+  }, [sessionAcademy]);
+
+  useEffect(() => {
     setPartsBasket((current) =>
       current.map((item) => {
         const quote = item.partId ? livePartQuotes[item.partId] : null;
@@ -827,6 +844,7 @@ export function UserPortal() {
         newDraft.requestItem = "?곗뒪?ы넲";
         setSelectedPartCategory("PC");
         setSelectedSubCategory("CPU");
+        setDesktopBuildMode(null);
       } else {
         setSelectedPartCategory(null);
         setSelectedSubCategory(null);
@@ -854,6 +872,25 @@ export function UserPortal() {
     if (draft.category === "tablet") return "신규 대여, 연장, 반납 중 필요한 요청 유형과 사용 용도를 적어주세요.";
     return "무엇이 필요한지만 편하게 적어주세요. 담당자가 분류합니다.";
   }, [draft.category, draft.requestItem]);
+  const isEquipmentWizard =
+    draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기");
+  const equipmentWizardSteps = useMemo(
+    () =>
+      draft.requestItem === "소모품/주변기기"
+        ? [
+            { title: "1. 품목 선택", description: "카테고리를 먼저 고르고 필요한 품목을 골라 담습니다." },
+            { title: "2. 세부 선택", description: "검색과 가격 확인 후 장바구니를 구성합니다." },
+            { title: "3. 요청 정보", description: "수량, 설치 위치, 사용 목적을 간단히 적습니다." },
+            { title: "4. 최종 점검", description: "접수 전 내용을 한 번 더 확인하고 요청합니다." }
+          ]
+        : [
+            { title: "1. 구성 방식", description: "추천 구성으로 시작할지, 직접 부품을 고를지 정합니다." },
+            { title: "2. 장비 선택", description: "선택한 방식에 따라 견적안이나 부품을 구성합니다." },
+            { title: "3. 요청 정보", description: "수량, 설치 위치, 사용 목적과 추가 요청을 적습니다." },
+            { title: "4. 최종 점검", description: "장바구니와 요청 내용을 확인한 뒤 접수합니다." }
+          ],
+    [draft.requestItem]
+  );
   const validationMessage = useMemo(() => {
     if (!draft.title.trim()) return "요청 제목을 입력해주세요.";
     if (!draft.academy.trim()) return "학원(지점)을 선택해주세요.";
@@ -1582,9 +1619,11 @@ export function UserPortal() {
                         if (val === "데스크톱") {
                           setSelectedPartCategory("PC");
                           setSelectedSubCategory("CPU");
+                          setDesktopBuildMode(null);
                         } else {
                           setSelectedPartCategory(null);
                           setSelectedSubCategory(null);
+                          setDesktopBuildMode(null);
                         }
                       }} className="field" aria-label="장비 종류">
                         <option>노트북</option>
@@ -1595,6 +1634,11 @@ export function UserPortal() {
                         <option>기타 장비</option>
                       </select>
                     ) : null}
+                    {sessionAcademy ? (
+                      <div className="field flex items-center bg-slate-100 text-slate-600">
+                        접속 지점: <span className="ml-2 font-bold text-slate-900">{sessionAcademy}</span>
+                      </div>
+                    ) : (
                     <select
                       value={draft.academy}
                       onChange={(event) => setDraft({ ...draft, academy: event.target.value })}
@@ -1608,6 +1652,7 @@ export function UserPortal() {
                       <option>학원(지점B)</option>
                       <option>학원(지점C)</option>
                     </select>
+                    )}
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -1700,7 +1745,7 @@ export function UserPortal() {
                     </div>
                   </div>
 
-                  {draft.category === "equipment" ? (
+                  {!isEquipmentWizard && draft.category === "equipment" ? (
                     <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
                       <input
                         value={draft.quantity}
@@ -1736,6 +1781,453 @@ export function UserPortal() {
                         <option value="기존 장비 교체">기존 장비 교체</option>
                         <option value="추가 증설">추가 증설</option>
                       </select>
+                    </div>
+                  ) : null}
+
+                  {isEquipmentWizard ? (
+                    <div className="mt-2 space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                      <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-white p-4">
+                        <div className="flex items-center gap-2 text-sm font-black text-slate-800">
+                          {draft.requestItem === "데스크톱" ? (
+                            <>
+                              <HardDrive className="h-4 w-4 text-blue-600" />
+                              PC 부품 사양 구성
+                            </>
+                          ) : (
+                            <>
+                              <PackageCheck className="h-4 w-4 text-blue-600" />
+                              소모품 및 주변기기 선택
+                            </>
+                          )}
+                        </div>
+                        <div className="grid gap-3 lg:grid-cols-4">
+                          {equipmentWizardSteps.map((step, index) => {
+                            const active = equipmentWizardStep === index;
+                            const done = equipmentWizardStep > index;
+                            return (
+                              <div
+                                key={step.title}
+                                className={`rounded-2xl border px-4 py-3 transition-all ${
+                                  active
+                                    ? "border-blue-600 bg-blue-50 shadow-sm"
+                                    : done
+                                      ? "border-emerald-200 bg-emerald-50"
+                                      : "border-slate-200 bg-white"
+                                }`}
+                              >
+                                <p className={`text-xs font-black ${active ? "text-blue-700" : done ? "text-emerald-700" : "text-slate-500"}`}>{step.title}</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-500">{step.description}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {equipmentWizardStep === 0 ? (
+                        draft.requestItem === "데스크톱" ? (
+                          <div className="space-y-4">
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <button
+                                type="button"
+                                onClick={() => setDesktopBuildMode("preset")}
+                                className={`rounded-2xl border p-5 text-left transition-all ${
+                                  desktopBuildMode === "preset" ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200 hover:shadow-sm"
+                                }`}
+                              >
+                                <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Option 1</p>
+                                <h4 className="mt-2 text-lg font-black text-slate-900">추천 구성으로 시작</h4>
+                                <p className="mt-2 text-sm leading-6 text-slate-500">다음 단계에서 미리 정리된 추천안 중 하나를 선택합니다.</p>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDesktopBuildMode("custom")}
+                                className={`rounded-2xl border p-5 text-left transition-all ${
+                                  desktopBuildMode === "custom" ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200 hover:shadow-sm"
+                                }`}
+                              >
+                                <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Option 2</p>
+                                <h4 className="mt-2 text-lg font-black text-slate-900">직접 부품 선택</h4>
+                                <p className="mt-2 text-sm leading-6 text-slate-500">다음 단계에서 CPU, RAM, SSD, 모니터를 직접 고릅니다.</p>
+                              </button>
+                            </div>
+                            <div className="hidden rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                              처음에는 추천 구성을 고르고, 필요하면 다음 단계에서 CPU·RAM·SSD 같은 부품을 세부 조정할 수 있습니다.
+                            </div>
+                            {false && desktopBuildMode === "preset" ? (
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              {equipmentPresets.map((preset) => (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => applyPreset(preset)}
+                                  className="group relative flex flex-col items-start overflow-hidden rounded-2xl border border-blue-100 bg-white p-5 text-left transition-all hover:border-blue-400 hover:shadow-lg"
+                                >
+                                  <div className="absolute right-0 top-0 -mr-4 -mt-4 h-16 w-16 rounded-full bg-blue-50 transition-transform group-hover:scale-150" />
+                                  <span className="relative rounded-lg bg-blue-600 px-2.5 py-1 text-[10px] font-black text-white uppercase">{preset.group}</span>
+                                  <h5 className="relative mt-3 text-sm font-black text-slate-800">{preset.name}</h5>
+                                  <p className="relative mt-1 text-[11px] font-medium text-slate-400">추천 조합을 한 번에 장바구니에 담습니다.</p>
+                                  <div className="relative mt-4 flex items-center gap-1.5 text-xs font-bold text-blue-600">
+                                    바로 구성하기 <ArrowRight className="h-3.5 w-3.5" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                              처음에는 필요한 품목군만 간단히 정하고, 다음 단계에서 검색 후 담아주시면 됩니다.
+                            </div>
+                            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-4">
+                              {partsCategories.map((cat) => {
+                                const active = selectedPartCategory === cat.id;
+                                const Icon = cat.icon;
+                                return (
+                                  <button
+                                    key={cat.id}
+                                    type="button"
+                                    onClick={() => setSelectedPartCategory(active ? null : cat.id)}
+                                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-4 transition-all ${
+                                      active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"
+                                    }`}
+                                  >
+                                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                      <Icon className="h-4 w-4" />
+                                    </div>
+                                    <span className={`text-[11px] font-black tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{cat.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )
+                      ) : null}
+
+                      {equipmentWizardStep === 1 ? (
+                        <div className="space-y-4">
+                          {draft.requestItem === "?곗뒪?ы넲" && desktopBuildMode === "preset" ? (
+                            <div className="space-y-4">
+                              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                                추천 구성 방식으로 선택했습니다. 아래 견적안 중 하나를 골라 장바구니에 담아주세요.
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-3">
+                                {equipmentPresets.map((preset) => (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => applyPreset(preset)}
+                                    className="group relative flex flex-col items-start overflow-hidden rounded-2xl border border-blue-100 bg-white p-5 text-left transition-all hover:border-blue-400 hover:shadow-lg"
+                                  >
+                                    <div className="absolute right-0 top-0 -mr-4 -mt-4 h-16 w-16 rounded-full bg-blue-50 transition-transform group-hover:scale-150" />
+                                    <span className="relative rounded-lg bg-blue-600 px-2.5 py-1 text-[10px] font-black text-white uppercase">{preset.group}</span>
+                                    <h5 className="relative mt-3 text-sm font-black text-slate-800">{preset.name}</h5>
+                                    <p className="relative mt-1 text-[11px] font-medium text-slate-400">선택 즉시 장바구니가 추천 조합으로 채워집니다.</p>
+                                    <div className="relative mt-4 flex items-center gap-1.5 text-xs font-bold text-blue-600">
+                                      이 구성 선택 <ArrowRight className="h-3.5 w-3.5" />
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          {draft.requestItem !== "?곗뒪?ы넲" || desktopBuildMode !== "preset" ? (
+                            <>
+                          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
+                            {draft.requestItem === "데스크톱"
+                              ? desktopPartCategories.map((sub) => {
+                                  const active = selectedSubCategory === sub;
+                                  let Icon = Cpu;
+                                  if (sub === "RAM") Icon = MemoryStick;
+                                  if (sub === "SSD") Icon = Database;
+                                  if (sub === "Monitor") Icon = MonitorIcon;
+                                  if ((sub as string) === "Keyboard") Icon = KeyboardIcon;
+                                  if ((sub as string) === "Mouse") Icon = MousePointer2;
+                                  if ((sub as string) === "Cables") Icon = Usb;
+                                  if (["Power", "Mainboard", "Case", "Graphic Card"].includes(sub as string)) Icon = HardDrive;
+
+                                  return (
+                                    <button
+                                      key={sub}
+                                      type="button"
+                                      onClick={() => setSelectedSubCategory(active ? null : sub)}
+                                      className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${
+                                        active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"
+                                      }`}
+                                    >
+                                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                        <Icon className="h-4 w-4" />
+                                      </div>
+                                      <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{sub}</span>
+                                    </button>
+                                  );
+                                })
+                              : partsCategories.map((cat) => {
+                                  const active = selectedPartCategory === cat.id;
+                                  const Icon = cat.icon;
+                                  return (
+                                    <button
+                                      key={cat.id}
+                                      type="button"
+                                      onClick={() => setSelectedPartCategory(active ? null : cat.id)}
+                                      className={`flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${
+                                        active ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm"
+                                      }`}
+                                    >
+                                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                                        <Icon className="h-4 w-4" />
+                                      </div>
+                                      <span className={`text-[10px] font-black uppercase tracking-tight ${active ? "text-blue-900" : "text-slate-600"}`}>{cat.name}</span>
+                                    </button>
+                                  );
+                                })}
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                              <div className="relative min-w-[220px] flex-1">
+                                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <input
+                                  value={partQuery}
+                                  onChange={(event) => setPartQuery(event.target.value)}
+                                  className="field h-11 pl-12 pr-4 text-sm"
+                                  placeholder="모델명, 제조사, 부품명 검색"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void refreshPartPrices()}
+                                disabled={isPartPriceLoading}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                              >
+                                <RefreshCw className={`h-3.5 w-3.5 ${isPartPriceLoading ? "animate-spin" : ""}`} />
+                                {isPartPriceLoading ? "가격 조회 중..." : "가격 새로고침"}
+                              </button>
+                            </div>
+                            <p className="mb-4 text-[11px] font-medium text-slate-500">
+                              {lastCheckedAt
+                                ? `마지막 가격 확인 ${new Date(lastCheckedAt).toLocaleTimeString("ko-KR", {
+                                    hour: "2-digit",
+                                    minute: "2-digit"
+                                  })}. 최신 기준가를 함께 검토할 수 있습니다.`
+                                : "가격 정보를 불러오면 최신 기준가를 함께 검토할 수 있습니다."}
+                            </p>
+
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {filteredParts.map((part) => (
+                                <article key={part.id} className="flex flex-col rounded-xl border border-slate-100 bg-slate-50 p-3 transition-all hover:border-blue-200 hover:shadow-sm">
+                                  <div className="flex items-start justify-between">
+                                    <span className="rounded-lg bg-white px-2 py-0.5 text-[9px] font-black text-slate-500 uppercase">{part.category}</span>
+                                    <div className="text-right">
+                                      <span className="block text-xs font-bold text-slate-900">{part.price.toLocaleString()}원</span>
+                                      <span className="block text-[10px] font-bold text-emerald-600">{livePartQuotes[part.id]?.status === "live" ? "실시간가" : "기준가"}</span>
+                                    </div>
+                                  </div>
+                                  <h4 className="mt-1.5 grow text-xs font-bold text-slate-800 line-clamp-1">{part.name}</h4>
+                                  <div className="mt-2.5 flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => openDanawa(part.id, part.name)}
+                                      className="flex h-7 flex-1 items-center justify-center rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
+                                    >
+                                      다나와
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openGmarket(part.id, part.name)}
+                                      className="flex h-7 flex-1 items-center justify-center rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
+                                    >
+                                      지마켓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => addToBasket(part)}
+                                      className="flex h-7 flex-1 items-center justify-center rounded-lg bg-blue-600 text-[10px] font-bold text-white hover:bg-blue-700"
+                                    >
+                                      담기
+                                    </button>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-black text-slate-900">현재 장바구니</h4>
+                              <span className="text-xs font-bold text-blue-700">{partsBasket.length}개 선택</span>
+                            </div>
+                            {partsBasket.length ? (
+                              <div className="mt-3 space-y-2">
+                                {partsBasket.map((p) => (
+                                  <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/70 bg-white px-3 py-2">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-bold text-slate-800">{p.name}</p>
+                                      <p className="text-xs text-slate-500">{p.category}</p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-sm font-black text-blue-700">{p.price.toLocaleString()}원</span>
+                                      <button type="button" onClick={() => removeFromBasket(p.id)} className="text-slate-300 transition-colors hover:text-rose-500">
+                                        <X className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-3 text-sm text-slate-500">아직 담은 항목이 없습니다. 필요한 부품이나 주변기기를 선택해 주세요.</p>
+                            )}
+                          </div>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {equipmentWizardStep === 2 ? (
+                        <div className="space-y-4">
+                          <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2">
+                            <input
+                              value={draft.quantity}
+                              onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+                              className="field bg-slate-50"
+                              placeholder="필요 수량 *"
+                            />
+                            <input
+                              value={draft.location}
+                              onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                              className="field bg-slate-50"
+                              placeholder="설치/사용 위치 *"
+                            />
+                            <input
+                              value={draft.usagePurpose}
+                              onChange={(event) => setDraft({ ...draft, usagePurpose: event.target.value })}
+                              className="field bg-slate-50"
+                              placeholder="사용 목적 *"
+                            />
+                            <input
+                              value={draft.currentModel}
+                              onChange={(event) => setDraft({ ...draft, currentModel: event.target.value })}
+                              className="field bg-slate-50"
+                              placeholder="기존 장비 모델명 또는 현재 사양"
+                            />
+                            <select
+                              value={draft.replacementStatus}
+                              onChange={(event) => setDraft({ ...draft, replacementStatus: event.target.value })}
+                              className="field bg-slate-50 sm:col-span-2"
+                            >
+                              <option value="">교체 여부 선택</option>
+                              <option value="신규 설치">신규 설치</option>
+                              <option value="기존 장비 교체">기존 장비 교체</option>
+                              <option value="추가 증설">추가 증설</option>
+                            </select>
+                          </div>
+                          <textarea
+                            value={draft.detail}
+                            onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
+                            className="field min-h-[120px] resize-y"
+                            placeholder="모델명, 선호 브랜드, 예산 범위, 설치 장소 특이사항 등 추가 요청을 적어주세요."
+                          />
+                        </div>
+                      ) : null}
+
+                      {equipmentWizardStep === 3 ? (
+                        <div className="space-y-4">
+                          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Final Review</p>
+                              <h4 className="mt-2 text-lg font-black text-slate-900">최종 점검 후 요청 접수</h4>
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                  <p className="text-[11px] font-bold text-slate-400">요청 종류</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{draft.requestItem}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                  <p className="text-[11px] font-bold text-slate-400">희망 일정</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{draft.requestedDate ?? defaultRequestedDate}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                  <p className="text-[11px] font-bold text-slate-400">수량</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{draft.quantity || "-"}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                  <p className="text-[11px] font-bold text-slate-400">설치 위치</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{draft.location || "-"}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 sm:col-span-2">
+                                  <p className="text-[11px] font-bold text-slate-400">사용 목적</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{draft.usagePurpose || "-"}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 sm:col-span-2">
+                                  <p className="text-[11px] font-bold text-slate-400">추가 요청</p>
+                                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{draft.detail || "추가 요청 없음"}</p>
+                                </div>
+                              </div>
+                              {validationMessage ? (
+                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                  접수 전에 확인할 항목: {validationMessage}
+                                </div>
+                              ) : (
+                                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                                  필수 입력이 채워졌습니다. 아래에서 요청을 접수하면 됩니다.
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-black text-slate-900">선택 항목</h4>
+                                <span className="text-xs font-bold text-blue-700">{partsBasket.length}개</span>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {partsBasket.length ? (
+                                  partsBasket.map((p) => (
+                                    <div key={p.id} className="rounded-xl border border-white/70 bg-white px-3 py-2">
+                                      <p className="text-sm font-bold text-slate-800">{p.name}</p>
+                                      <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                                        <span>{p.category}</span>
+                                        <span className="font-bold text-blue-700">{p.price.toLocaleString()}원</span>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="rounded-xl border border-dashed border-blue-200 bg-white/80 px-3 py-4 text-sm text-slate-500">
+                                    아직 장바구니에 담긴 항목이 없습니다. 기본 견적 요청만 접수해도 괜찮습니다.
+                                  </div>
+                                )}
+                              </div>
+                              <div className="mt-4 flex items-center justify-between border-t border-blue-100 pt-4">
+                                <span className="text-sm font-bold text-slate-600">예상 합계</span>
+                                <span className="text-lg font-black text-blue-700">{partsBasket.reduce((sum, p) => sum + p.price, 0).toLocaleString()}원</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setEquipmentWizardStep((current) => Math.max(current - 1, 0))}
+                          disabled={equipmentWizardStep === 0}
+                          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          이전
+                        </button>
+                        <div className="text-xs text-slate-500">
+                          Step {equipmentWizardStep + 1} / {equipmentWizardSteps.length}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEquipmentWizardStep((current) => Math.min(current + 1, equipmentWizardSteps.length - 1))}
+                          disabled={
+                            equipmentWizardStep === equipmentWizardSteps.length - 1 ||
+                            (draft.requestItem === "데스크톱" && equipmentWizardStep === 0 && desktopBuildMode === null)
+                          }
+                          className="inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          다음
+                        </button>
+                      </div>
                     </div>
                   ) : null}
 
@@ -1864,7 +2356,7 @@ export function UserPortal() {
                   ) : null}
 
                   {(draft.category === "equipment" && (draft.requestItem === "데스크톱" || draft.requestItem === "소모품/주변기기")) && (
-                    <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="hidden mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
                           {draft.requestItem === "데스크톱" ? (
@@ -2009,6 +2501,7 @@ export function UserPortal() {
                       </div>
                     </div>
                   )}
+                  {!isEquipmentWizard ? (
                   <input
                     value={draft.detail}
                     onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
@@ -2023,10 +2516,11 @@ export function UserPortal() {
                             : "상세 내용을 적어주세요"
                     }
                   />
+                  ) : null}
                 </>
               )}
 
-              {draft.category === "equipment" ? (
+              {draft.category === "equipment" && (!isEquipmentWizard || equipmentWizardStep === equipmentWizardSteps.length - 1) ? (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-900">
                   <h3 className="font-bold">장비 요청 안내</h3>
                   <p className="mt-2 leading-relaxed">
@@ -2068,6 +2562,8 @@ export function UserPortal() {
                   ))}
                 </div>
               ) : null}
+              {!isEquipmentWizard || equipmentWizardStep === equipmentWizardSteps.length - 1 ? (
+                <>
               <div className="flex flex-wrap items-center gap-2">
                 {(["보통", "빠름", "긴급"] as const).map((urgency) => (
                   <button
@@ -2121,6 +2617,8 @@ export function UserPortal() {
                 {draft.resubmitId ? "수정하여 재접수" : "요청 접수"}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
+                </>
+              ) : null}
             </div>
           </section>
           </div>
