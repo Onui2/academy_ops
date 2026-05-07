@@ -23,6 +23,9 @@ Main modules:
 8. Audit Logging
 9. Admin Dashboard
 10. AI Harness Integration
+   - Build Harness
+   - Ops Harness
+   - Governance Harness
 
 Tech Stack:
 
@@ -347,30 +350,81 @@ Toast notifications.
 
 # 9. AI Harness Rules
 
-Use:
+Academy Ops Hub uses 3 harnesses, not 1.
 
-Router
+## 9.1 Build Harness
 
-Builder
+Use when:
+- building features
+- fixing bugs
+- changing UI
+- changing API
+- changing database schema
 
-Reviewer
-
-Auditor
-
-DocWriter
+Roles:
+- Router
+- Builder
+- Reviewer
+- DocWriter
 
 Flow:
+- task classify
+- design
+- build
+- review
+- test
+- doc
+- PR
 
-task classify
-→ build
-→ review
-→ audit
-→ doc
-→ PR
+## 9.2 Ops Harness
 
-No direct merge.
+Use when:
+- handling A/S requests
+- answering FAQ
+- diagnosing incidents
+- generating support tickets
+- creating operator guidance
 
-Approval required.
+Roles:
+- Router
+- Support Diagnostician
+- Ticket Builder
+- Knowledge Writer
+
+Flow:
+- classify request
+- diagnose
+- resolve or escalate
+- ticket
+- log
+
+## 9.3 Governance Harness
+
+Use when:
+- validating approval
+- checking permission
+- enforcing workflow rules
+- writing audit log
+- checking policy and compliance
+
+Roles:
+- Policy Checker
+- Permission Guard
+- Workflow Guard
+- Auditor
+
+Flow:
+- validate policy
+- validate permission
+- validate transition
+- audit
+- approve or block
+
+Rules:
+- no direct merge
+- no approval bypass
+- no mutation without audit log
+- approval required for sensitive actions
 
 ---
 
