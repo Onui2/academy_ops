@@ -1534,100 +1534,7 @@ export function UserPortal() {
             </div>
 
             <div className="mt-5 grid gap-3">
-              {draft.category === "as" && asStep === "searching" ? (
-                <div className="mt-2 space-y-5">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {asFaqCategories.map((category) => (
-                      <article key={category.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-600">
-                            <Wrench className="h-5 w-5" aria-hidden="true" />
-                          </div>
-                          <div>
-                            <h3 className="font-black text-slate-900">{category.title}</h3>
-                            <p className="text-xs text-slate-500">{category.desc}</p>
-                          </div>
-                        </div>
-                        <div className="mt-4 grid gap-3">
-                          {category.items.map((item) => (
-                            <button
-                              key={item.symptom}
-                              onClick={() => setSymptomQuery(item.symptom)}
-                              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-blue-200 hover:bg-blue-50/40"
-                            >
-                              <p className="text-sm font-bold text-slate-800">{item.symptom}</p>
-                              <p className="mt-1 text-xs text-slate-500">{item.solution[0]}</p>
-                            </button>
-                          ))}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        value={symptomQuery}
-                        onChange={(e) => setSymptomQuery(e.target.value)}
-                        className="field pl-10"
-                        placeholder="예: 모니터가 안 나와요, 인터넷이 끊겨요"
-                      />
-                    </div>
-
-                    {diagnosis ? (
-                      <div className="mt-4 rounded-xl border border-blue-200 bg-white p-5 shadow-sm">
-                        <div className="mb-3 flex items-center gap-2 font-bold text-blue-800">
-                          <Bot className="h-5 w-5" />
-                          <span>자가 진단 결과: {diagnosis.diagnosis}</span>
-                        </div>
-                        <ul className="space-y-2">
-                          {diagnosis.solution.map((step, i) => (
-                            <li key={i} className="flex gap-2 text-sm text-slate-600">
-                              <span className="font-bold text-blue-500">{i + 1}.</span>
-                              {step}
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="mt-5 flex gap-2">
-                          <button
-                            onClick={() => {
-                              setSymptomQuery("");
-                              setDiagnosis(null);
-                            }}
-                            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold hover:bg-slate-50"
-                          >
-                            해결되었습니다
-                          </button>
-                          <button
-                            onClick={() => {
-                              setAsStep("form");
-                              setDraft({ ...draft, title: symptomQuery, detail: "FAQ/자가 진단을 시도했지만 해결되지 않았습니다." });
-                            }}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
-                          >
-                            해결 안 됨, 티켓 생성
-                          </button>
-                        </div>
-                      </div>
-                    ) : symptomQuery.length > 1 ? (
-                      <div className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
-                        매칭되는 자가 해결 가이드가 없습니다.
-                        <button
-                          onClick={() => {
-                            setAsStep("form");
-                            setDraft({ ...draft, title: symptomQuery, detail: "FAQ 검색 결과 없음. 직접 점검이 필요합니다." });
-                          }}
-                          className="ml-2 font-bold text-blue-600 underline"
-                        >
-                          바로 문의하기
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <>
+              <>
                   <div className={`grid gap-3 ${draft.category === "equipment" ? "sm:grid-cols-[1fr_180px_160px]" : "sm:grid-cols-[1fr_160px]"}`}>
                     <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="field" placeholder={draft.category === "tablet" ? "요청 제목 (예: 태블릿 5대 신규 렌탈 요청)" : "요청 제목을 적어주세요"} />
                     {draft.category === "equipment" ? (
@@ -2535,8 +2442,7 @@ export function UserPortal() {
                     }
                   />
                   ) : null}
-                </>
-              )}
+              </>
 
               {draft.category === "equipment" && (!isEquipmentWizard || equipmentWizardStep === equipmentWizardSteps.length - 1) ? (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-900">
