@@ -1987,13 +1987,13 @@ export function UserPortal() {
                               <option value="기존 장비 교체">기존 장비 교체</option>
                               <option value="추가 증설">추가 증설</option>
                             </select>
+                            <textarea
+                              value={draft.detail}
+                              onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
+                              className="field bg-slate-50 sm:col-span-2 min-h-[88px] resize-none"
+                              placeholder="모델명, 선호 브랜드, 예산 범위, 설치 장소 특이사항 등 추가 요청을 적어주세요."
+                            />
                           </div>
-                          <textarea
-                            value={draft.detail}
-                            onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
-                            className="field min-h-[120px] resize-y"
-                            placeholder="모델명, 선호 브랜드, 예산 범위, 설치 장소 특이사항 등 추가 요청을 적어주세요."
-                          />
                         </div>
                       ) : null}
 
