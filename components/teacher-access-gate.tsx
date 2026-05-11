@@ -135,6 +135,17 @@ export function TeacherAccessGate({
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("학원명을 먼저 입력해 주세요.");
+  const [messageType, setMessageType] = useState<"info" | "error">("info");
+
+  function setError(text: string) {
+    setMessage(text);
+    setMessageType("error");
+  }
+
+  function setInfo(text: string) {
+    setMessage(text);
+    setMessageType("info");
+  }
 
   const selectedBranch = branches.find((item) => item.value === form.branch) ?? null;
 
@@ -172,7 +183,7 @@ export function TeacherAccessGate({
       if (!response.ok) {
         setBranches([]);
         setForm((current) => ({ ...current, branch: "" }));
-        setMessage(data.message ?? "지점 목록을 불러오지 못했습니다.");
+        setError(data.message ?? "지점 목록을 불러오지 못했습니다.");
         return;
       }
 
@@ -188,15 +199,15 @@ export function TeacherAccessGate({
       }
 
       if (!items.length) {
-        setMessage("선택한 학원에 연결된 지점을 찾지 못했습니다.");
+        setError("선택한 학원에 연결된 지점을 찾지 못했습니다.");
         return;
       }
 
-      setMessage("학원 확인이 완료되었습니다. 지점과 teacher 계정을 입력해 주세요.");
+      setInfo("학원 확인이 완료되었습니다. 지점과 teacher 계정을 입력해 주세요.");
     } catch {
       setBranches([]);
       setForm((current) => ({ ...current, branch: "" }));
-      setMessage("지점 목록을 가져오는 중 네트워크 오류가 발생했습니다.");
+      setError("지점 목록을 가져오는 중 네트워크 오류가 발생했습니다.");
     } finally {
       setIsLoadingBranches(false);
     }
@@ -205,7 +216,7 @@ export function TeacherAccessGate({
   async function searchAcademies() {
     const query = academyQuery.trim();
     if (!query) {
-      setMessage("학원명을 입력해 주세요.");
+      setError("학원명을 입력해 주세요.");
       return;
     }
 
@@ -214,7 +225,7 @@ export function TeacherAccessGate({
     setSelectedAcademy(null);
     setBranches([]);
     setForm((current) => ({ ...current, branch: "" }));
-    setMessage("학원 정보를 확인하고 있습니다...");
+    setInfo("학원 정보를 확인하고 있습니다...");
 
     try {
       const response = await fetch(`/api/teacher/brands?name=${encodeURIComponent(query)}`, {
@@ -224,7 +235,7 @@ export function TeacherAccessGate({
 
       const data = (await response.json()) as { items?: AcademyItem[]; message?: string };
       if (!response.ok) {
-        setMessage(data.message ?? "학원 조회에 실패했습니다.");
+        setError(data.message ?? "학원 조회에 실패했습니다.");
         return;
       }
 
@@ -232,7 +243,7 @@ export function TeacherAccessGate({
       setAcademyResults(items);
 
       if (!items.length) {
-        setMessage("입력한 이름으로 학원을 찾지 못했습니다.");
+        setError("입력한 이름으로 학원을 찾지 못했습니다.");
         return;
       }
 
@@ -247,9 +258,9 @@ export function TeacherAccessGate({
         return;
       }
 
-      setMessage("조회된 학원 중 하나를 선택해 주세요.");
+      setInfo("조회된 학원 중 하나를 선택해 주세요.");
     } catch {
-      setMessage("학원 조회 중 네트워크 오류가 발생했습니다.");
+      setError("학원 조회 중 네트워크 오류가 발생했습니다.");
     } finally {
       setIsSearchingAcademy(false);
     }
@@ -279,27 +290,27 @@ export function TeacherAccessGate({
       sysSeq: "",
       branch: ""
     });
-    setMessage("학원명을 먼저 입력해 주세요.");
+    setInfo("학원명을 먼저 입력해 주세요.");
   }
 
   async function submit() {
     if (!selectedAcademy) {
-      setMessage("학원을 먼저 선택해 주세요.");
+      setError("학원을 먼저 선택해 주세요.");
       return;
     }
 
     if (!form.branch) {
-      setMessage("지점을 선택해 주세요.");
+      setError("지점을 선택해 주세요.");
       return;
     }
 
     if (!form.username.trim() || !form.password) {
-      setMessage("아이디와 비밀번호를 입력해 주세요.");
+      setError("아이디와 비밀번호를 입력해 주세요.");
       return;
     }
 
     setIsSubmitting(true);
-    setMessage("teacher 로그인 정보를 확인하고 있습니다...");
+    setInfo("teacher 로그인 정보를 확인하고 있습니다...");
 
     try {
       const response = await fetch("/api/teacher/login", {
@@ -320,7 +331,7 @@ export function TeacherAccessGate({
 
       const data = (await response.json()) as { message?: string; session?: TeacherSession };
       if (!response.ok || !data.session) {
-        setMessage(data.message ?? "teacher 로그인에 실패했습니다.");
+        setError(data.message ?? "teacher 로그인에 실패했습니다.");
         return;
       }
 
@@ -342,9 +353,9 @@ export function TeacherAccessGate({
         return;
       }
 
-      setMessage("로그인되었습니다.");
+      setInfo("로그인되었습니다.");
     } catch {
-      setMessage("teacher 로그인 중 네트워크 오류가 발생했습니다.");
+      setError("teacher 로그인 중 네트워크 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
     }
@@ -475,7 +486,13 @@ export function TeacherAccessGate({
               </div>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
+            <div
+              className={`mt-6 rounded-2xl border px-4 py-3 text-sm font-medium ${
+                messageType === "error"
+                  ? "border-red-200 bg-red-50 text-red-800"
+                  : "border-blue-100 bg-blue-50 text-blue-900"
+              }`}
+            >
               {message}
             </div>
 
