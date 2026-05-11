@@ -835,13 +835,13 @@ export function UserPortal() {
 
   const applyCategoryDraft = useCallback(
     (categoryId: Category) => {
-      const newDraft = createEmptyDraft(categoryId, "?곗뒪?ы넲");
+      const newDraft = createEmptyDraft(categoryId, "데스크톱");
       newDraft.academy = draft.academy;
       newDraft.requestedDate = draft.requestedDate;
       newDraft.urgency = draft.urgency;
 
       if (categoryId === "equipment") {
-        newDraft.requestItem = "?곗뒪?ы넲";
+        newDraft.requestItem = "데스크톱";
         setSelectedPartCategory("PC");
         setSelectedSubCategory("CPU");
         setDesktopBuildMode(null);
@@ -1924,7 +1924,7 @@ export function UserPortal() {
 
                       {equipmentWizardStep === 1 ? (
                         <div className="space-y-4">
-                          {draft.requestItem === "?곗뒪?ы넲" && desktopBuildMode === "preset" ? (
+                          {draft.requestItem === "데스크톱" && desktopBuildMode === "preset" ? (
                             <div className="space-y-4">
                               <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                                 추천 구성 방식으로 선택했습니다. 아래 견적안 중 하나를 골라 장바구니에 담아주세요.
@@ -1949,7 +1949,7 @@ export function UserPortal() {
                               </div>
                             </div>
                           ) : null}
-                          {draft.requestItem !== "?곗뒪?ы넲" || desktopBuildMode !== "preset" ? (
+                          {draft.requestItem !== "데스크톱" || desktopBuildMode !== "preset" ? (
                             <>
                           <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
                             {draft.requestItem === "데스크톱"
