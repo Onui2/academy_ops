@@ -966,12 +966,15 @@ export function OpsConsole() {
         await createDbRequest(supabase, user, next);
         await loadDbRequests(user);
       } else if (teacherSession) {
+        const portalItem = ticketMeta?.requestDate && !next.requestedDate
+          ? { ...next, requestedDate: ticketMeta.requestDate }
+          : next;
         const response = await fetch("/api/portal/requests", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ item: next })
+          body: JSON.stringify({ item: portalItem })
         });
 
         const data = (await response.json()) as { message?: string };

@@ -466,26 +466,6 @@ export function UserPortal() {
         console.error("Failed to load history from DB", _e);
         setSubmitted(readAdminQueueFromStorage().items);
       }
-    } else if (teacherSession) {
-      try {
-        const response = await fetch("/api/portal/requests", {
-          method: "GET",
-          cache: "no-store"
-        });
-
-        const data = (await response.json()) as { items?: WorkItem[]; message?: string };
-        if (!response.ok) {
-          throw new Error(data.message ?? "teacher 요청 목록을 불러오지 못했습니다.");
-        }
-
-        const remoteItems = Array.isArray(data.items) ? data.items : [];
-        const localItems = readAdminQueueFromStorage().items;
-        const merged = [...remoteItems, ...localItems.filter((item) => !remoteItems.some((row) => row.id === item.id))];
-        setSubmitted(merged);
-      } catch (error) {
-        console.error("Failed to load history from teacher API", error);
-        setSubmitted(readAdminQueueFromStorage().items);
-      }
     } else {
       setSubmitted(readAdminQueueFromStorage().items);
     }
@@ -1017,19 +997,6 @@ export function UserPortal() {
 
           if (teacherSession) {
             await patchPortalRequest(updated.id, updated);
-          } else if (teacherSession) {
-            const response = await fetch(`/api/portal/requests/${encodeURIComponent(updated.id)}`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({ item: updated })
-            });
-
-            const data = (await response.json()) as { message?: string };
-            if (!response.ok) {
-              throw new Error(data.message ?? "teacher 요청 재접수 저장에 실패했습니다.");
-            }
           } else {
             updateInAdminQueue(updated);
           }
@@ -1077,31 +1044,6 @@ export function UserPortal() {
                   }
                 : undefined
           });
-        } else if (teacherSession) {
-          const response = await fetch("/api/portal/requests", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              item,
-              category: draft.category,
-              metadata: requestMetadata,
-              nasPermission:
-                draft.category === "nas"
-                  ? {
-                      user_email: draft.userEmail.trim() || "unknown@academy.local",
-                      resource_name: draft.folderName.trim() || finalTitle,
-                      permission_level: draft.permissionLevel || "read"
-                    }
-                  : undefined
-            })
-          });
-
-          const data = (await response.json()) as { message?: string };
-          if (!response.ok) {
-            throw new Error(data.message ?? "teacher 요청 저장에 실패했습니다.");
-          }
         } else {
           pushToAdminQueue(item);
         }
