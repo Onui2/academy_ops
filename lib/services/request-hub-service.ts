@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HarnessError } from "@/lib/harness/harness-error";
 import { runAuditHarness } from "@/lib/harness/audit/audit-harness";
+import { dispatchWebhookEvent } from "@/lib/services/webhook-service";
 import { listAuditLogsForRequest } from "@/lib/harness/audit/audit-log.service";
 import { ensurePermission } from "@/lib/harness/permission/permission-harness";
 import type { RequestPermissionSubject } from "@/lib/harness/permission/permission-checker";
@@ -494,6 +495,21 @@ export async function createRequestWithHarness(
     summary: `${payload.item.id} 요청이 접수되었습니다.`
   });
 
+  void dispatchWebhookEvent(
+    {
+      event: workflowStatus === "APPROVAL_PENDING" ? "approval.required" : "request.submitted",
+      timestamp: new Date().toISOString(),
+      requestNo: payload.item.id,
+      workflowStatus,
+      category,
+      requesterName: actor.actorName,
+      branchName: actor.branchName,
+      title: payload.item.title,
+      priority: normalizeLegacyPriority(payload.item.priority)
+    },
+    supabase
+  );
+
   return {
     requestNo: payload.item.id,
     requestId
@@ -868,6 +884,32 @@ export async function updateRequestWorkflowStatusForActor(
         ? `${requestNo} 요청의 승인 단계가 기록되었습니다.`
         : `${requestNo} 요청 상태가 ${nextLegacyStatus}(으)로 변경되었습니다.`
   });
+
+  const webhookEventName =
+    effectiveWorkflowStatus === "APPROVED"
+      ? "approval.approved"
+      : effectiveWorkflowStatus === "REJECTED"
+        ? "approval.rejected"
+        : effectiveWorkflowStatus === "COMPLETED"
+          ? "request.completed"
+          : effectiveWorkflowStatus === "CANCELED"
+            ? "request.canceled"
+            : null;
+
+  if (webhookEventName) {
+    void dispatchWebhookEvent(
+      {
+        event: webhookEventName,
+        timestamp: new Date().toISOString(),
+        requestNo,
+        workflowStatus: effectiveWorkflowStatus,
+        requesterName: row.requester_name,
+        branchName: row.branch_name,
+        title: row.title
+      },
+      supabase
+    );
+  }
 
   return getRequestDetailForActor(supabase, actor, requestNo);
 }

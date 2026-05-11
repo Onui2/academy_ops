@@ -13,10 +13,13 @@ import {
   Download,
   FilePlus2,
   Filter,
+  Globe,
   HardDrive,
   Home,
   LogOut,
   PackageCheck,
+  Plug,
+  Plus,
   Printer,
   RefreshCw,
   Search,
@@ -61,7 +64,7 @@ import type { TeacherSession } from "@/lib/teacher-session";
 import type { BasketItem, EquipmentPart, UserRole, WorkItem, WorkPriority, WorkStatus } from "@/types/ops";
 import type { User } from "@supabase/supabase-js";
 
-type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly";
+type MenuKey = "dashboard" | "queue" | "equipment" | "parts" | "tablet" | "as" | "nas" | "audit" | "subly" | "webhook";
 type AuditEvent = { id: string; at: string; actor: string; event: string };
 type RequestForm = {
   module: string;
@@ -173,7 +176,8 @@ const menuItems: { key: MenuKey; label: string; icon: LucideIcon }[] = [
   { key: "tablet", label: "태블릿 렌탈", icon: PackageCheck },
   { key: "as", label: "A/S", icon: Stethoscope },
   { key: "nas", label: "NAS", icon: HardDrive },
-  { key: "audit", label: "감사/AI", icon: Activity }
+  { key: "audit", label: "감사/AI", icon: Activity },
+  { key: "webhook", label: "웹훅 설정", icon: Plug }
 ];
 
 const statuses: Array<WorkStatus | "전체"> = ["전체", "접수", "검토", "승인 대기", "진행", "완료", "보류"];
@@ -518,7 +522,7 @@ function resolveTeacherSessionRole(session: TeacherSession) {
 
 function getVisibleMenuKeysForRole(role: UserRole): MenuKey[] {
   if (role === "super_admin") {
-    return ["dashboard", "queue", "tablet", "as", "nas", "audit"];
+    return ["dashboard", "queue", "tablet", "as", "nas", "audit", "webhook"];
   }
 
   if (role === "executive" || role === "academy_admin") {
@@ -1505,7 +1509,7 @@ export function OpsConsole() {
 
         <div className="min-w-0">
           <>
-            {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} overdueCount={overdueCount} auditCount={audit.length} setActiveMenu={setActiveMenu} /> : null}
+            {activeMenu === "dashboard" ? <Dashboard pendingCount={pendingCount} approvalCount={approvalCount} riskCount={riskCount} overdueCount={overdueCount} auditCount={audit.length} setActiveMenu={setActiveMenu} setQueueStatus={setStatus} /> : null}
             {activeMenu === "queue" ? <QueueScreen items={filteredItems} selectedItem={selectedItem} role={role} status={status} setStatus={setStatus} setSelectedId={setSelectedId} approve={approve} reject={reject} remove={remove} form={form} setForm={setForm} createManualRequest={createManualRequest} /> : null}
             {activeMenu === "equipment" ? <EquipmentScreen equipment={equipment} setEquipment={setEquipment} createEquipment={createEquipment} partsBasket={partsBasket} setPartsBasket={setPartsBasket} setActiveMenu={setActiveMenu} /> : null}
             {activeMenu === "parts" ? (
@@ -1552,6 +1556,7 @@ export function OpsConsole() {
               />
             ) : null}
             {activeMenu === "audit" ? <AuditScreen audit={audit} resetLocal={resetLocal} items={items} /> : null}
+            {activeMenu === "webhook" ? <WebhookSettingsScreen supabase={supabase} user={user} /> : null}
           </>
         </div>
       </div>
@@ -1587,15 +1592,20 @@ function Screen({ title, desc, children }: { title: string; desc: string; childr
   );
 }
 
-function Dashboard(props: { pendingCount: number; approvalCount: number; riskCount: number; overdueCount: number; auditCount: number; setActiveMenu: (menu: MenuKey) => void }) {
+function Dashboard(props: { pendingCount: number; approvalCount: number; riskCount: number; overdueCount: number; auditCount: number; setActiveMenu: (menu: MenuKey) => void; setQueueStatus: (status: WorkStatus | "전체") => void }) {
+  const goQueue = (status: WorkStatus | "전체") => {
+    props.setQueueStatus(status);
+    props.setActiveMenu("queue");
+  };
+
   return (
     <Screen title="대시보드" desc="오늘 처리할 운영 업무를 요약합니다.">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="진행 업무" value={props.pendingCount.toString()} icon={ClipboardList} />
-        <Metric label="승인 대기" value={props.approvalCount.toString()} icon={ShieldCheck} />
-        <Metric label="SLA 초과" value={props.overdueCount.toString()} icon={AlertTriangle} />
-        <Metric label="위험 신호" value={props.riskCount.toString()} icon={AlertTriangle} />
-        <Metric label="감사 로그" value={props.auditCount.toString()} icon={Activity} />
+        <Metric label="진행 업무" value={props.pendingCount.toString()} icon={ClipboardList} onClick={() => goQueue("진행")} />
+        <Metric label="승인 대기" value={props.approvalCount.toString()} icon={ShieldCheck} onClick={() => goQueue("승인 대기")} urgent={props.approvalCount > 0} />
+        <Metric label="SLA 초과" value={props.overdueCount.toString()} icon={AlertTriangle} onClick={() => goQueue("전체")} />
+        <Metric label="위험 신호" value={props.riskCount.toString()} icon={AlertTriangle} onClick={() => goQueue("전체")} />
+        <Metric label="감사 로그" value={props.auditCount.toString()} icon={Activity} onClick={() => props.setActiveMenu("audit")} />
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-2">
@@ -1671,16 +1681,23 @@ function Dashboard(props: { pendingCount: number; approvalCount: number; riskCou
   );
 }
 
-function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
+function Metric({ label, value, icon: Icon, onClick, urgent }: { label: string; value: string; icon: LucideIcon; onClick?: () => void; urgent?: boolean }) {
   return (
-    <article className="surface-strong rounded-xl p-4 sm:p-5 shadow-sm border border-slate-50">
+    <article
+      className={`surface-strong rounded-xl p-4 sm:p-5 shadow-sm border transition-all ${urgent ? "border-amber-200 bg-amber-50/30" : "border-slate-50"} ${onClick ? "cursor-pointer hover:shadow-md hover:border-blue-200" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter") onClick(); } : undefined}
+    >
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider sm:text-sm">{label}</span>
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-400 sm:h-9 sm:w-9">
+        <span className={`text-xs font-bold uppercase tracking-wider sm:text-sm ${urgent ? "text-amber-600" : "text-slate-400"}`}>{label}</span>
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg sm:h-9 sm:w-9 ${urgent ? "bg-amber-50 text-amber-500" : "bg-slate-50 text-slate-400"}`}>
           <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
         </div>
       </div>
-      <strong className="mt-2 block text-2xl font-black text-slate-900 sm:mt-4 sm:text-3xl">{value}</strong>
+      <strong className={`mt-2 block text-2xl font-black sm:mt-4 sm:text-3xl ${urgent ? "text-amber-700" : "text-slate-900"}`}>{value}</strong>
+      {onClick ? <p className="mt-1 text-[10px] font-medium text-slate-400">클릭해서 보기 →</p> : null}
     </article>
   );
 }
@@ -1704,15 +1721,74 @@ function QueueScreen(props: {
   const [approvalTarget, setApprovalTarget] = useState<WorkItem | null>(null);
   const [rejectionTarget, setRejectionTarget] = useState<WorkItem | null>(null);
   const [receiptItem, setReceiptItem] = useState<WorkItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchApproving, setBatchApproving] = useState(false);
 
   const openDetail = (id: string) => {
     props.setSelectedId(id);
     setDetailOpen(true);
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const approvableSelected = props.items.filter(
+    (item) => selectedIds.has(item.id) && canApprove(props.role, item)
+  );
+
+  const batchApprove = async () => {
+    if (!approvableSelected.length) return;
+    setBatchApproving(true);
+    for (const item of approvableSelected) {
+      await new Promise<void>((resolve) => {
+        props.approve(item);
+        setTimeout(resolve, 300);
+      });
+    }
+    setSelectedIds(new Set());
+    setBatchApproving(false);
+  };
+
   return (
     <Screen title="요청 큐" desc="모든 요청의 진행 상태와 승인 액션을 관리합니다.">
-      <QueueTable {...props} openDetail={openDetail} openCreate={() => setCreateOpen(true)} />
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <span className="text-sm font-bold text-emerald-800">{selectedIds.size}개 선택됨</span>
+          {approvableSelected.length > 0 ? (
+            <button
+              type="button"
+              disabled={batchApproving}
+              onClick={() => void batchApprove()}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              <Check className="h-3.5 w-3.5" />
+              {batchApproving ? "승인 중..." : `${approvableSelected.length}건 일괄 승인`}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs font-bold text-slate-500 hover:text-slate-700"
+          >
+            선택 해제
+          </button>
+        </div>
+      ) : null}
+      <QueueTable
+        {...props}
+        openDetail={openDetail}
+        openCreate={() => setCreateOpen(true)}
+        openApproval={(item) => setApprovalTarget(item)}
+        openRejection={(item) => setRejectionTarget(item)}
+        selectedIds={selectedIds}
+        toggleSelect={toggleSelect}
+      />
       {createOpen ? (
         <Modal title="요청 접수" onClose={() => setCreateOpen(false)}>
           <RequestComposer
@@ -1788,6 +1864,10 @@ function QueueTable(props: {
   remove: (id: string) => void;
   openDetail: (id: string) => void;
   openCreate: () => void;
+  openApproval: (item: WorkItem) => void;
+  openRejection: (item: WorkItem) => void;
+  selectedIds: Set<string>;
+  toggleSelect: (id: string) => void;
 }) {
   const router = useRouter();
 
@@ -1808,7 +1888,7 @@ function QueueTable(props: {
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead className="bg-slate-50/80 text-left text-xs uppercase text-slate-500">
-            <tr><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
+            <tr><th className="pl-4 pr-2 py-3 w-8"></th><th className="px-4 py-3">요청</th><th className="px-4 py-3">상태</th><th className="px-4 py-3">담당</th><th className="px-4 py-3">액션</th></tr>
           </thead>
           <tbody>
             {props.items.length === 0 ? (
@@ -1822,7 +1902,16 @@ function QueueTable(props: {
               ))
             ) : (
               props.items.map((item) => (
-                <tr key={item.id} className="border-t border-border hover:bg-blue-50/40 transition-colors">
+                <tr key={item.id} className={`border-t border-border transition-colors ${props.selectedIds.has(item.id) ? "bg-blue-50/60" : "hover:bg-blue-50/40"}`}>
+                  <td className="pl-4 pr-2 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={props.selectedIds.has(item.id)}
+                      onChange={() => props.toggleSelect(item.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                      aria-label={`${item.title} 선택`}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <button
                       onClick={() => router.push(`/ops/requests/${encodeURIComponent(item.id)}`)}
@@ -1836,8 +1925,26 @@ function QueueTable(props: {
                   <td className="px-4 py-3 font-medium text-slate-600">{item.owner}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
-                      <IconButton label="승인" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={Check} tone="text-emerald-700" />
-                      <IconButton label="보류" disabled={!canApprove(props.role, item)} onClick={() => props.openDetail(item.id)} icon={X} tone="text-rose-700" />
+                      <IconButton
+                        label="승인"
+                        disabled={!canApprove(props.role, item)}
+                        onClick={() => {
+                          props.setSelectedId(item.id);
+                          props.openApproval(item);
+                        }}
+                        icon={Check}
+                        tone="text-emerald-700"
+                      />
+                      <IconButton
+                        label="보류"
+                        disabled={!canApprove(props.role, item)}
+                        onClick={() => {
+                          props.setSelectedId(item.id);
+                          props.openRejection(item);
+                        }}
+                        icon={X}
+                        tone="text-rose-700"
+                      />
                       <IconButton label="삭제" disabled={props.role !== "super_admin"} onClick={() => props.remove(item.id)} icon={Trash2} tone="text-muted-foreground" />
                     </div>
                   </td>
@@ -1852,29 +1959,50 @@ function QueueTable(props: {
           <div className="p-8 text-center text-slate-400 text-sm">요청이 없습니다.</div>
         ) : (
           props.items.map((item) => (
-            <div
-              key={item.id}
-              className="p-4 active:bg-slate-50 transition-colors"
-              onClick={() => router.push(`/ops/requests/${encodeURIComponent(item.id)}`)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900 leading-tight truncate">{item.title}</div>
-                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-medium text-slate-500">
-                    <span className="text-blue-600">{item.module}</span>
-                    <span>{item.requester}</span>
-                    <span className={item.priority === "긴급" ? "text-rose-600 font-bold" : ""}>{item.priority}</span>
+            <div key={item.id} className="p-4 transition-colors">
+              <div
+                className="active:opacity-70 cursor-pointer"
+                onClick={() => router.push(`/ops/requests/${encodeURIComponent(item.id)}`)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 leading-tight truncate">{item.title}</div>
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-medium text-slate-500">
+                      <span className="text-blue-600">{item.module}</span>
+                      <span>{item.requester}</span>
+                      <span className={item.priority === "긴급" ? "text-rose-600 font-bold" : ""}>{item.priority}</span>
+                    </div>
                   </div>
+                  <StatusPill status={item.status} />
                 </div>
-                <StatusPill status={item.status} />
-              </div>
-              <div className="mt-3 flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-1 text-slate-600">
-                  <span className="font-bold">담당:</span>
-                  <span>{item.owner}</span>
+                <div className="mt-3 flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1 text-slate-600">
+                    <span className="font-bold">담당:</span>
+                    <span>{item.owner}</span>
+                  </div>
+                  <div className="text-slate-400">{item.due}</div>
                 </div>
-                <div className="text-slate-400">{item.due}</div>
               </div>
+              {canApprove(props.role, item) ? (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { props.setSelectedId(item.id); props.openApproval(item); }}
+                    className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-50 text-xs font-bold text-emerald-700 border border-emerald-200 active:bg-emerald-100"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    승인
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { props.setSelectedId(item.id); props.openRejection(item); }}
+                    className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-50 text-xs font-bold text-rose-700 border border-rose-200 active:bg-rose-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    보류
+                  </button>
+                </div>
+              ) : null}
             </div>
           ))
         )}
@@ -3764,6 +3892,385 @@ function PartsScreen({
           </div>
         </aside>
       </div>
+    </Screen>
+  );
+}
+
+type WebhookConfig = {
+  id: string;
+  label: string;
+  url: string;
+  enabled: boolean;
+  events: string[];
+  created_at: string;
+};
+
+type DeliveryLog = {
+  id: string;
+  config_id: string | null;
+  event: string;
+  request_no: string | null;
+  url_masked: string | null;
+  status_code: number | null;
+  success: boolean;
+  error_message: string | null;
+  delivered_at: string;
+};
+
+const WEBHOOK_EVENTS = [
+  { value: "request.submitted", label: "요청 접수" },
+  { value: "approval.required", label: "승인 필요" },
+  { value: "approval.approved", label: "승인 완료" },
+  { value: "approval.rejected", label: "승인 거부" },
+  { value: "request.completed", label: "처리 완료" },
+  { value: "request.canceled", label: "요청 취소" }
+];
+
+function WebhookSettingsScreen({ supabase, user }: { supabase: ReturnType<typeof createClient> | null; user: User | null }) {
+  const [configs, setConfigs] = useState<WebhookConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({ label: "", url: "", secret: "", events: [] as string[] });
+  const [saving, setSaving] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; statusCode: number | null; error: string | null }>>({});
+  const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  const fetchConfigs = async () => {
+    if (!user || !supabase) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("로그인이 필요합니다.");
+      const res = await fetch("/api/webhooks/config", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = (await res.json()) as { configs?: WebhookConfig[]; message?: string };
+      if (!res.ok) throw new Error(json.message ?? "불러오기 실패");
+      setConfigs(json.configs ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "오류 발생");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDeliveryLogs = async () => {
+    if (!supabase) return;
+    setLogsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/webhooks/test", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = (await res.json()) as { logs?: DeliveryLog[] };
+      setDeliveryLogs(json.logs ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTest = async (config: WebhookConfig) => {
+    if (!supabase) return;
+    setTestingId(config.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/webhooks/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ url: config.url })
+      });
+      const json = (await res.json()) as { success: boolean; statusCode: number | null; error: string | null };
+      setTestResults((prev) => ({ ...prev, [config.id]: json }));
+    } catch (err) {
+      setTestResults((prev) => ({ ...prev, [config.id]: { success: false, statusCode: null, error: err instanceof Error ? err.message : "오류" } }));
+    } finally {
+      setTestingId(null);
+      await fetchDeliveryLogs();
+    }
+  };
+
+  useEffect(() => {
+    void fetchConfigs();
+    void fetchDeliveryLogs();
+  }, [user]);
+
+  const handleAdd = async () => {
+    if (!form.url.trim() || !supabase) return;
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/webhooks/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(form)
+      });
+      const json = (await res.json()) as { message?: string };
+      if (!res.ok) throw new Error(json.message ?? "저장 실패");
+      setForm({ label: "", url: "", secret: "", events: [] });
+      await fetchConfigs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "오류 발생");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle = async (id: string, enabled: boolean) => {
+    if (!supabase) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    await fetch(`/api/webhooks/config/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ enabled })
+    });
+    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, enabled } : c)));
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!supabase) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    await fetch(`/api/webhooks/config/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    setConfigs((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const toggleEvent = (event: string) => {
+    setForm((prev) => ({
+      ...prev,
+      events: prev.events.includes(event)
+        ? prev.events.filter((e) => e !== event)
+        : [...prev.events, event]
+    }));
+  };
+
+  return (
+    <Screen title="웹훅 설정" desc="승인/요청 이벤트를 외부 시스템(Slack, 노션, 자체 서버 등)으로 전달합니다.">
+      <section className="surface-strong overflow-hidden rounded-2xl">
+        <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white">
+            <Plug className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="font-bold">웹훅 엔드포인트</h3>
+            <p className="text-sm text-slate-500">이벤트 발생 시 지정한 URL로 POST 요청을 보냅니다.</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-sm text-slate-400">불러오는 중...</div>
+        ) : error ? (
+          <div className="p-8 text-center text-sm text-rose-600">{error}</div>
+        ) : configs.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-400">등록된 웹훅이 없습니다.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {configs.map((config) => (
+              <div key={config.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-bold text-sm text-slate-900">{config.label || "이름 없음"}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{config.url}</p>
+                  {config.events.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {config.events.map((ev) => (
+                        <span key={ev} className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                          {WEBHOOK_EVENTS.find((e) => e.value === ev)?.label ?? ev}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {config.events.length === 0 && (
+                    <span className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">모든 이벤트</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={testingId === config.id}
+                    onClick={() => void handleTest(config)}
+                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Globe className="h-3 w-3" />
+                    {testingId === config.id ? "전송 중..." : "테스트"}
+                  </button>
+                  {testResults[config.id] !== undefined ? (
+                    <span className={`text-[10px] font-bold ${testResults[config.id].success ? "text-emerald-600" : "text-rose-600"}`}>
+                      {testResults[config.id].success ? `✓ ${testResults[config.id].statusCode}` : `✗ ${testResults[config.id].error ?? "실패"}`}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void handleToggle(config.id, !config.enabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${config.enabled ? "bg-emerald-500" : "bg-slate-200"}`}
+                    aria-label={config.enabled ? "비활성화" : "활성화"}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${config.enabled ? "translate-x-6" : "translate-x-1"}`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(config.id)}
+                    className="text-slate-400 hover:text-rose-500 transition-colors"
+                    aria-label="삭제"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="surface-strong overflow-hidden rounded-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h3 className="font-bold">전송 기록</h3>
+            <p className="mt-0.5 text-sm text-slate-500">최근 50건 웹훅 전송 결과</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchDeliveryLogs()}
+            disabled={logsLoading}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${logsLoading ? "animate-spin" : ""}`} />
+            새로고침
+          </button>
+        </div>
+        {logsLoading ? (
+          <div className="p-6 text-center text-sm text-slate-400">불러오는 중...</div>
+        ) : deliveryLogs.length === 0 ? (
+          <div className="p-6 text-center text-sm text-slate-400">전송 기록이 없습니다.</div>
+        ) : (
+          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            {deliveryLogs.map((log) => (
+              <div key={log.id} className="flex items-center gap-3 px-5 py-3">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${log.success ? "bg-emerald-500" : "bg-rose-500"}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-bold text-slate-700">
+                    {WEBHOOK_EVENTS.find((e) => e.value === log.event)?.label ?? log.event}
+                    {log.request_no ? <span className="ml-1.5 font-normal text-slate-400">{log.request_no}</span> : null}
+                  </p>
+                  <p className="mt-0.5 truncate text-[10px] text-slate-400">{log.url_masked}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className={`text-xs font-bold ${log.success ? "text-emerald-600" : "text-rose-600"}`}>
+                    {log.success ? `${log.status_code} OK` : log.error_message ?? "실패"}
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    {new Date(log.delivered_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="surface-strong overflow-hidden rounded-2xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <h3 className="font-bold">새 웹훅 추가</h3>
+          <p className="mt-0.5 text-sm text-slate-500">승인 알림을 받을 Slack incoming webhook이나 자체 서버 URL을 등록하세요.</p>
+        </div>
+        <div className="grid gap-4 p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">이름 (선택)</label>
+              <input
+                value={form.label}
+                onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
+                className="field w-full"
+                placeholder="예: Slack 승인 알림"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">Secret (선택)</label>
+              <input
+                type="password"
+                value={form.secret}
+                onChange={(e) => setForm((prev) => ({ ...prev, secret: e.target.value }))}
+                className="field w-full"
+                placeholder="HMAC 서명 키"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">엔드포인트 URL *</label>
+            <input
+              value={form.url}
+              onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
+              className="field w-full"
+              placeholder="https://hooks.slack.com/services/..."
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">수신할 이벤트 (비워두면 모두 수신)</label>
+            <div className="flex flex-wrap gap-2">
+              {WEBHOOK_EVENTS.map((ev) => (
+                <button
+                  key={ev.value}
+                  type="button"
+                  onClick={() => toggleEvent(ev.value)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                    form.events.includes(ev.value)
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40"
+                  }`}
+                >
+                  {ev.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={!form.url.trim() || saving}
+              onClick={() => void handleAdd()}
+              className="focus-ring inline-flex h-10 items-center gap-2 rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              {saving ? "저장 중..." : "웹훅 추가"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="surface-strong overflow-hidden rounded-2xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <h3 className="font-bold">페이로드 예시</h3>
+        </div>
+        <pre className="overflow-x-auto p-5 text-xs text-slate-700 leading-relaxed">
+{`{
+  "event": "approval.required",
+  "timestamp": "2026-05-11T09:00:00.000Z",
+  "requestNo": "AOH-20260511-001-001",
+  "workflowStatus": "APPROVAL_PENDING",
+  "category": "equipment",
+  "requesterName": "김선생",
+  "branchName": "강남 플립에듀",
+  "title": "노트북 2대 구매 요청",
+  "priority": "보통"
+}`}
+        </pre>
+        <div className="border-t border-slate-100 px-5 py-3">
+          <p className="text-xs text-slate-500">
+            <span className="font-bold">X-Hub-Signature-256</span> 헤더로 HMAC-SHA256 서명이 포함됩니다. Secret을 설정한 경우에만 서명이 추가됩니다.
+          </p>
+        </div>
+      </section>
     </Screen>
   );
 }

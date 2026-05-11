@@ -1426,6 +1426,24 @@ export function UserPortal() {
                         </span>
                       </div>
 
+                      {normalizedStatus === "승인 대기" ? (
+                        <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                          <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">승인 진행 중</p>
+                          {item.approvalStep !== undefined && item.approvalStep > 0 ? (
+                            <div className="mt-1.5 flex items-center gap-2">
+                              {[1, 2, 3].map((step) => (
+                                <div
+                                  key={step}
+                                  className={`h-1.5 flex-1 rounded-full ${step <= item.approvalStep! ? "bg-amber-500" : "bg-amber-100"}`}
+                                />
+                              ))}
+                              <span className="text-[10px] font-bold text-amber-700 whitespace-nowrap">{item.approvalStep}단계 처리 중</span>
+                            </div>
+                          ) : (
+                            <p className="mt-0.5 text-xs text-amber-600">담당자 검토 후 승인 절차가 진행됩니다.</p>
+                          )}
+                        </div>
+                      ) : null}
                       {item.rejectionNote && isRejected ? (
                         <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs font-medium text-rose-700">보류 사유: {item.rejectionNote}</p>
                       ) : null}
@@ -2564,17 +2582,26 @@ export function UserPortal() {
               ) : null}
               {!isEquipmentWizard || equipmentWizardStep === equipmentWizardSteps.length - 1 ? (
                 <>
-              <div className="flex flex-wrap items-center gap-2">
-                {(["보통", "빠름", "긴급"] as const).map((urgency) => (
-                  <button
-                    key={urgency}
-                    onClick={() => setDraft({ ...draft, urgency })}
-                    className={`rounded-lg border px-3 py-2 text-sm font-semibold ${draft.urgency === urgency ? "border-blue-300 bg-blue-50 text-blue-700" : "border-gray-200 bg-white text-gray-600"}`}
-                  >
-                    {urgency}
-                  </button>
-                ))}
-                <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-500">처리 우선순위</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: "보통" as const, label: "보통", desc: "1~3일 내", color: "border-slate-200 bg-white text-slate-700", activeColor: "border-slate-400 bg-slate-50 text-slate-900" },
+                    { value: "빠름" as const, label: "빠름", desc: "당일~익일", color: "border-amber-100 bg-white text-amber-700", activeColor: "border-amber-400 bg-amber-50 text-amber-900" },
+                    { value: "긴급" as const, label: "긴급", desc: "즉시 처리", color: "border-rose-100 bg-white text-rose-700", activeColor: "border-rose-500 bg-rose-50 text-rose-900" }
+                  ] as const).map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setDraft({ ...draft, urgency: item.value })}
+                      className={`flex flex-col items-center gap-0.5 rounded-xl border px-3 py-2.5 transition-all ${draft.urgency === item.value ? item.activeColor + " shadow-sm" : item.color + " hover:opacity-80"}`}
+                    >
+                      <span className="text-sm font-black">{item.label}</span>
+                      <span className="text-[10px] font-medium opacity-70">{item.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
                   <Paperclip className="h-4 w-4" aria-hidden="true" />
                   파일 첨부
                   <input
@@ -2613,9 +2640,22 @@ export function UserPortal() {
                   <p className="text-xs text-red-700">긴급 요청 시에는 우선 처리를 위한 구체적인 사유를 적어주세요.</p>
                 </div>
               ) : null}
-              <button onClick={submit} disabled={isLoading} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
-                {draft.resubmitId ? "수정하여 재접수" : "요청 접수"}
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              <button
+                onClick={submit}
+                disabled={isLoading}
+                className="focus-ring inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-base font-black text-white shadow-lg shadow-blue-100 transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto sm:h-12"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    접수 중...
+                  </>
+                ) : (
+                  <>
+                    {draft.resubmitId ? "수정하여 재접수" : "운영팀에 요청 접수"}
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </>
+                )}
               </button>
                 </>
               ) : null}
