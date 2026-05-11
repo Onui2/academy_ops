@@ -16,10 +16,14 @@ export function middleware(request: NextRequest) {
   // If user is logged in and accesses /login or /, redirect to their correct dashboard
   if (hasSession && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/")) {
     try {
-      // Basic base64 decode for edge runtime
-      const base64 = sessionCookie.value.replace(/-/g, "+").replace(/_/g, "/");
+      // Signed format: base64url(json).base64url(hmac) — strip signature, parse payload only.
+      // HMAC is verified by API routes; middleware is routing-only.
+      const raw = sessionCookie.value;
+      const dotIndex = raw.lastIndexOf(".");
+      const payloadPart = dotIndex !== -1 ? raw.slice(0, dotIndex) : raw;
+      const base64 = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
       const decoded = JSON.parse(atob(base64));
-      
+
       const role = decoded.portalRole;
       const url = request.nextUrl.clone();
       url.pathname = role === "admin" ? "/ops" : "/user";

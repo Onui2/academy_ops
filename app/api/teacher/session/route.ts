@@ -1,24 +1,5 @@
 import { NextResponse } from "next/server";
-
-type TeacherSession = {
-  username: string;
-  brand: string;
-  brandName: string | null;
-  branch: string;
-  branchName: string | null;
-  portalRole: "admin" | "user";
-  type: "ADMIN" | "STUDENT" | "STAFF";
-  authenticatedAt: string;
-  profile: Record<string, unknown> | null;
-};
-
-function decodeSession(value: string): TeacherSession | null {
-  try {
-    return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as TeacherSession;
-  } catch {
-    return null;
-  }
-}
+import { readAndVerifyTeacherSession } from "@/lib/server-teacher-session";
 
 function clearSession(response: NextResponse) {
   response.cookies.set({
@@ -43,25 +24,19 @@ function clearSession(response: NextResponse) {
 }
 
 export async function GET(request: Request) {
-  const sessionCookie = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((item) => item.trim())
-    .find((item) => item.startsWith("flipedu_teacher_session="))
-    ?.slice("flipedu_teacher_session=".length);
+  const cookieHeader = request.headers.get("cookie");
 
-  const tokenCookie = request.headers
-    .get("cookie")
+  const tokenCookie = cookieHeader
     ?.split(";")
     .map((item) => item.trim())
     .find((item) => item.startsWith("flipedu_teacher_token="))
     ?.slice("flipedu_teacher_token=".length);
 
-  if (!sessionCookie || !tokenCookie) {
+  if (!tokenCookie) {
     return NextResponse.json({ message: "로그인 세션이 없습니다." }, { status: 401 });
   }
 
-  const session = decodeSession(sessionCookie);
+  const session = readAndVerifyTeacherSession(cookieHeader);
   if (!session) {
     const response = NextResponse.json({ message: "세션 정보를 읽지 못했습니다." }, { status: 401 });
     clearSession(response);

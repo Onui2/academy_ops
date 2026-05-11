@@ -156,36 +156,39 @@ function parseDueDate(value: string) {
   return null;
 }
 
+let cachedPortalUserId: string | null = null;
+
 export async function ensureTeacherPortalRequester(supabase: SupabaseClient) {
-  const { data: listed, error: listError } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 1000
+  if (cachedPortalUserId) return cachedPortalUserId;
+
+  // Try to create the user first; if already exists, look up by listing with email filter.
+  const { data: created, error: createError } = await supabase.auth.admin.createUser({
+    email: PORTAL_SYSTEM_EMAIL,
+    password: PORTAL_SYSTEM_PASSWORD,
+    email_confirm: true,
+    user_metadata: { full_name: "Teacher Portal" }
   });
 
-  if (listError) throw listError;
+  let userId = created?.user?.id ?? null;
 
-  const existing = listed.users.find((user) => user.email?.toLowerCase() === PORTAL_SYSTEM_EMAIL.toLowerCase());
-  const portalUser =
-    existing ??
-    (
-      await supabase.auth.admin.createUser({
-        email: PORTAL_SYSTEM_EMAIL,
-        password: PORTAL_SYSTEM_PASSWORD,
-        email_confirm: true,
-        user_metadata: {
-          full_name: "Teacher Portal"
-        }
-      })
-    ).data.user;
+  if (!userId) {
+    // User already exists — find by listing with a small page and matching email.
+    if (createError && (createError as { status?: number }).status !== 422) throw createError;
 
-  if (!portalUser?.id) {
+    const { data: listed, error: listError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (listError) throw listError;
+
+    userId = listed.users.find((u) => u.email?.toLowerCase() === PORTAL_SYSTEM_EMAIL.toLowerCase())?.id ?? null;
+  }
+
+  if (!userId) {
     throw new Error("Teacher portal requester user could not be provisioned.");
   }
 
   const { error: profileError } = await supabase.from("profiles").upsert(
     {
-      id: portalUser.id,
-      email: portalUser.email ?? PORTAL_SYSTEM_EMAIL,
+      id: userId,
+      email: PORTAL_SYSTEM_EMAIL,
       full_name: "Teacher Portal",
       role: "general",
       mfa_enabled: false
@@ -194,7 +197,9 @@ export async function ensureTeacherPortalRequester(supabase: SupabaseClient) {
   );
 
   if (profileError) throw profileError;
-  return portalUser.id;
+
+  cachedPortalUserId = userId;
+  return userId;
 }
 
 export function dbRowToWorkItem(row: DbRequestRow): WorkItem {

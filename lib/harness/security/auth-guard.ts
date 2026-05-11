@@ -1,6 +1,6 @@
 import { HarnessError } from "@/lib/harness/harness-error";
 import { resolveAppRoleFromProfile, resolveLegacyRoleFromProfile } from "@/lib/harness/security/role-guard";
-import { readTeacherSessionFromCookieHeader } from "@/lib/teacher-session";
+import { readAndVerifyTeacherSession } from "@/lib/server-teacher-session";
 import type { AuthenticatedActor, AppRole } from "@/types/user-role";
 
 function resolveActorName(profile: Record<string, unknown> | null, username: string) {
@@ -9,7 +9,7 @@ function resolveActorName(profile: Record<string, unknown> | null, username: str
 }
 
 export function requireAuthenticatedActor(request: Request): AuthenticatedActor {
-  const session = readTeacherSessionFromCookieHeader(request.headers.get("cookie"));
+  const session = readAndVerifyTeacherSession(request.headers.get("cookie"));
   if (!session) {
     throw new HarnessError("Unauthenticated request.", 401, "로그인이 필요합니다.");
   }

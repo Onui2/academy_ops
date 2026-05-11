@@ -1,5 +1,6 @@
 import * as CryptoJS from "crypto-js";
 import { NextResponse } from "next/server";
+import { signSessionPayload } from "@/lib/session-crypto";
 
 const TEACHER_LOGIN_URL =
   process.env.FLIPEDU_TEACHER_LOGIN_URL ?? "https://teacher.flipedu.net/api/auth/login";
@@ -40,7 +41,8 @@ type UpstreamAttemptResult = {
 };
 
 function encodeSession(session: TeacherSession) {
-  return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
+  const payload = Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
+  return signSessionPayload(payload);
 }
 
 function encryptPassword(password: string) {
@@ -183,13 +185,6 @@ export async function POST(request: Request) {
     },
     {
       username: payload.username,
-      password: payload.password,
-      sysSeq: payload.sysSeq,
-      brand: payload.brand,
-      branch: payload.branch
-    },
-    {
-      username: payload.username,
       password: encryptedPassword,
       sys: payload.sysSeq,
       brand: payload.brand,
@@ -197,21 +192,7 @@ export async function POST(request: Request) {
     },
     {
       username: payload.username,
-      password: payload.password,
-      sys: payload.sysSeq,
-      brand: payload.brand,
-      branch: payload.branch
-    },
-    {
-      username: payload.username,
       password: encryptedPassword,
-      sysSeq: payload.sysSeq,
-      brandNo: payload.brand,
-      branch: payload.branch
-    },
-    {
-      username: payload.username,
-      password: payload.password,
       sysSeq: payload.sysSeq,
       brandNo: payload.brand,
       branch: payload.branch

@@ -38,7 +38,7 @@ export function canPerformAction(actor: AuthenticatedActor, action: PermissionAc
       return actor.actorUserId === subject.assignedUserId || actor.branchId === subject.branchId;
     }
 
-    return action === "request:status:update" ? false : isOwner(actor, subject);
+    return false;
   }
 
   if (action === "request:cancel") {

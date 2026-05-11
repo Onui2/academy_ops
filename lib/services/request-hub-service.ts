@@ -378,11 +378,18 @@ function canActorListRow(actor: AuthenticatedActor, row: RequestRow) {
 export async function listRequestsForActor(supabase: SupabaseClient, actor: AuthenticatedActor) {
   ensurePermission(actor, "request:list");
 
-  const { data, error } = await supabase
-    .from("ops_requests")
-    .select(requestSelect)
-    .order("created_at", { ascending: false });
+  let query = supabase.from("ops_requests").select(requestSelect).order("created_at", { ascending: false });
 
+  if (actor.appRole === "MANAGER" && actor.branchId) {
+    query = query.or(`branch_id.eq.${actor.branchId},assigned_user_id.eq.${actor.actorUserId}`);
+  } else if (actor.appRole === "STAFF") {
+    query = query.eq("assigned_user_id", actor.actorUserId);
+  } else if (actor.appRole !== "ADMIN" && actor.branchId) {
+    // USER role: pre-filter by branch to reduce dataset; username check still done in JS.
+    query = query.eq("branch_id", actor.branchId);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
 
   const rows = ((data ?? []) as RequestRow[]).filter((row) => canActorListRow(actor, row));
@@ -680,7 +687,9 @@ export async function updateRequestFromPortalActor(
     ensurePermission(actor, "request:read", subject, "요청을 수정할 권한이 없습니다.");
   }
 
-  runWorkflowHarness(currentWorkflowStatus, nextWorkflowStatus, { allowResubmit });
+  if (!actor.isAdmin) {
+    runWorkflowHarness(currentWorkflowStatus, nextWorkflowStatus, { allowResubmit });
+  }
 
   const changedAt = new Date().toISOString();
   const slaState = applySlaPauseState({
@@ -917,7 +926,15 @@ export async function updateRequestWorkflowStatusForActor(
 export async function getDashboardMetricsForActor(supabase: SupabaseClient, actor: AuthenticatedActor, auditContext: AuditContext) {
   ensurePermission(actor, "dashboard:read", undefined, "대시보드를 조회할 권한이 없습니다.");
 
-  const { data, error } = await supabase.from("ops_requests").select(requestSelect);
+  let metricsQuery = supabase.from("ops_requests").select(requestSelect);
+
+  if (actor.appRole === "MANAGER" && actor.branchId) {
+    metricsQuery = metricsQuery.or(`branch_id.eq.${actor.branchId},assigned_user_id.eq.${actor.actorUserId}`);
+  } else if (actor.appRole === "STAFF") {
+    metricsQuery = metricsQuery.eq("assigned_user_id", actor.actorUserId);
+  }
+
+  const { data, error } = await metricsQuery;
   if (error) throw error;
 
   const now = new Date();

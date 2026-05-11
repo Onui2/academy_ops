@@ -14,7 +14,11 @@ export type TeacherSession = {
 
 function decodeSession(value: string): TeacherSession | null {
   try {
-    return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as TeacherSession;
+    // Signed format: base64url(json).base64url(hmac) — strip signature for edge-runtime compatibility.
+    // HMAC verification happens server-side via readAndVerifyTeacherSession (Node.js only).
+    const dotIndex = value.lastIndexOf(".");
+    const payloadPart = dotIndex !== -1 ? value.slice(0, dotIndex) : value;
+    return JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")) as TeacherSession;
   } catch {
     return null;
   }
